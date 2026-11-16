@@ -7,8 +7,12 @@ import * as THREE from 'three'
 import { Crosshair, Heart, Droplets, Utensils, Radiation, Zap, Clock3, Eye, EyeOff, Volume2, VolumeX, RotateCcw, Shield, Package, Target } from 'lucide-react'
 
 type Stats = { health: number; stamina: number; hunger: number; thirst: number; radiation: number; ammo: number; kills: number }
+type LootKind = 'ration' | 'water' | 'bandage' | 'ammo' | 'scrap'
+type LootDrop = { kind: LootKind; amount: number }
+type Inventory = { ration: number; water: number; bandage: number; scrap: number }
 const INITIAL: Stats = { health: 86, stamina: 78, hunger: 69, thirst: 58, radiation: 8, ammo: 12, kills: 0 }
-type WorldProps = { perspective: boolean; onStats: React.Dispatch<React.SetStateAction<Stats>>; onMessage: (message: string) => void }
+const INITIAL_INVENTORY: Inventory = { ration: 1, water: 1, bandage: 1, scrap: 14 }
+type WorldProps = { perspective: boolean; onStats: React.Dispatch<React.SetStateAction<Stats>>; onMessage: (message: string) => void; onLoot: (loot: LootDrop) => void }
 
 function Player({ perspective, onStats, positionTracker }: { perspective: boolean; onStats: WorldProps['onStats']; positionTracker: React.RefObject<THREE.Vector3> }) {
   const group = useRef<THREE.Group>(null)
@@ -76,6 +80,11 @@ function GrassClump({ position, scale = 1 }: { position: [number, number, number
 
 function Barrel({ position }: { position: [number, number, number] }) { return <group position={position}><mesh position={[0, 0.48, 0]} castShadow><cylinderGeometry args={[0.38, 0.4, 0.95, 8]} /><meshStandardMaterial color="#6b5237" metalness={0.45} roughness={0.75} /></mesh><mesh position={[0, 0.22, 0]}><torusGeometry args={[0.39, 0.035, 4, 8]} /><meshStandardMaterial color="#383a34" metalness={0.65} /></mesh><mesh position={[0, 0.76, 0]}><torusGeometry args={[0.38, 0.035, 4, 8]} /><meshStandardMaterial color="#383a34" metalness={0.65} /></mesh></group> }
 
+function LootContainer({ position, loot, variant = 0 }: { position: [number, number, number]; loot: LootDrop; variant?: number }) {
+  const colors: Record<LootKind, string> = { ration: '#9e7948', water: '#648b88', bandage: '#9d8b74', ammo: '#7b7655', scrap: '#706957' }
+  return <group position={position} userData={{ lootCache: loot }}><mesh position={[0, 0.42, 0]} castShadow><boxGeometry args={[0.9, 0.72, 0.72]} /><meshStandardMaterial color={colors[loot.kind]} roughness={0.92} /></mesh><mesh position={[0, 0.82, 0]} rotation={[0, variant % 2 ? 0.06 : -0.04, 0]} castShadow><boxGeometry args={[0.98, 0.12, 0.8]} /><meshStandardMaterial color="#514b3e" metalness={0.2} /></mesh><mesh position={[0, 0.43, 0.37]}><boxGeometry args={[0.28, 0.18, 0.03]} /><meshStandardMaterial color="#c6b37a" emissive="#a98a4f" emissiveIntensity={0.12} /></mesh><mesh position={[0, 1.05, 0]}><octahedronGeometry args={[0.13, 0]} /><meshBasicMaterial color="#d7bf72" /></mesh></group>
+}
+
 function Zombie({ position, index, onStats, playerPosition }: { position: [number, number, number]; index: number; onStats: WorldProps['onStats']; playerPosition: React.RefObject<THREE.Vector3> }) {
   const ref = useRef<THREE.Group>(null); const phase = useRef(index * 1.4); const lastAttack = useRef(0)
   const outfit = ['#596457', '#5c4b43', '#67644c', '#454e4b'][index % 4]
@@ -92,11 +101,12 @@ function Zombie({ position, index, onStats, playerPosition }: { position: [numbe
   return <group ref={ref} userData={{ infected: true }} position={position}><mesh position={[0, 0.84, 0]} castShadow><capsuleGeometry args={[0.36, 0.76, 4, 7]} /><meshStandardMaterial color={outfit} roughness={1} /></mesh><mesh position={[0, 1.49, 0]} castShadow><sphereGeometry args={[0.26, 7, 6]} /><meshStandardMaterial color="#91a17c" /></mesh><mesh position={[0.1, 1.52, 0.23]}><sphereGeometry args={[0.06, 6, 5]} /><meshBasicMaterial color="#d54e35" /></mesh><mesh position={[-0.47, 0.86, 0.13]} rotation={[0, 0, -0.24]} castShadow><capsuleGeometry args={[0.11, 0.65, 3, 5]} /><meshStandardMaterial color={outfit} /></mesh><mesh position={[0.47, 0.88, 0.08]} rotation={[0, 0, 0.28]} castShadow><capsuleGeometry args={[0.11, 0.64, 3, 5]} /><meshStandardMaterial color={outfit} /></mesh><mesh position={[-0.19, 0.12, 0]} castShadow><capsuleGeometry args={[0.13, 0.45, 3, 5]} /><meshStandardMaterial color="#383a32" /></mesh><mesh position={[0.19, 0.12, 0]} castShadow><capsuleGeometry args={[0.13, 0.45, 3, 5]} /><meshStandardMaterial color="#383a32" /></mesh></group>
 }
 
-function World({ perspective, onStats, onMessage }: WorldProps) {
+function World({ perspective, onStats, onMessage, onLoot }: WorldProps) {
   const timeRef = useRef(0.32); const daylight = useRef<THREE.DirectionalLight>(null)
   const { camera, scene } = useThree()
   const raycaster = useMemo(() => new THREE.Raycaster(), [])
   const zombieHealth = useRef(new WeakMap<THREE.Object3D, number>())
+  const playerPosition = useRef(new THREE.Vector3())
   useEffect(() => {
     const handleAttack = (event: Event) => {
       const ranged = (event as CustomEvent<{ ranged: boolean }>).detail.ranged
@@ -118,7 +128,24 @@ function World({ perspective, onStats, onMessage }: WorldProps) {
     window.addEventListener('deadzone-attack', handleAttack)
     return () => window.removeEventListener('deadzone-attack', handleAttack)
   }, [camera, onMessage, onStats, raycaster, scene])
-  const playerPosition = useRef(new THREE.Vector3())
+  useEffect(() => {
+    const handleInteract = () => {
+      let nearest: { target: THREE.Object3D; loot: LootDrop; distance: number } | null = null
+      scene.traverse(object => {
+        const loot = object.userData.lootCache as LootDrop | undefined
+        if (!loot || !object.visible) return
+        const distance = object.getWorldPosition(new THREE.Vector3()).distanceTo(playerPosition.current)
+        if (distance < 3.2 && (!nearest || distance < nearest.distance)) nearest = { target: object, loot, distance }
+      })
+      if (!nearest) { onMessage('MOVE CLOSER TO A SUPPLY CACHE'); return }
+      const cache = nearest as { target: THREE.Object3D; loot: LootDrop; distance: number }
+      cache.target.visible = false
+      onLoot(cache.loot)
+      onMessage(`SCAVENGED ${cache.loot.amount} ${cache.loot.kind.toUpperCase()}`)
+    }
+    window.addEventListener('deadzone-interact', handleInteract)
+    return () => window.removeEventListener('deadzone-interact', handleInteract)
+  }, [onLoot, onMessage, scene])
   const houses = useMemo(() => [[-17, 0, -25], [17, 0, -24], [-20, 0, -9], [21, 0, -7], [-8.5, 0, 14], [8.5, 0, 16], [-9, 0, 32], [9, 0, 34], [-36, 0, -1], [36, 0, 2]].map(([x, y, z], i) => ({ position: [x, y, z] as [number, number, number], color: ['#817c68', '#8c8169', '#6f776d', '#8a7561'][i % 4], seed: i, facing: z > 0 ? Math.PI : 0 })), [])
   const trees = useMemo(() => Array.from({ length: 46 }, (_, i) => { const angle = i * 2.399; const radius = 14 + (i * 13 % 37); return { position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius] as [number, number, number], scale: 0.7 + i % 4 * 0.15 } }), [])
   const grasses = useMemo(() => Array.from({ length: 112 }, (_, i) => { const angle = i * 2.41; const radius = 6 + (i * 17 % 41); return { position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius] as [number, number, number], scale: 0.55 + i % 5 * 0.14 } }), [])
@@ -128,6 +155,13 @@ function World({ perspective, onStats, onMessage }: WorldProps) {
   const mailboxes = useMemo(() => [[-13, 0, -22], [13, 0, -21], [-16, 0, -6], [17, 0, -4], [-14, 0, 13], [14, 0, 15], [-13, 0, 31], [14, 0, 32]] as [number, number, number][], [])
   const barrels = useMemo(() => [[-7.5, 0, -18], [8, 0, -23], [-8, 0, 9], [8, 0, 17], [-30, 0, -3], [30, 0, 4]] as [number, number, number][], [])
   const poles = useMemo(() => [-40, -14, 14, 40].flatMap(z => [[-8, 0, z], [8, 0, z]] as [number, number, number][]), [])
+  const lootCaches = useMemo(() => [
+    { position: [0, 0, 4.5] as [number, number, number], loot: { kind: 'ration', amount: 2 } as LootDrop },
+    { position: [-14, 0, 13] as [number, number, number], loot: { kind: 'water', amount: 1 } as LootDrop },
+    { position: [12, 0, 25] as [number, number, number], loot: { kind: 'bandage', amount: 1 } as LootDrop },
+    { position: [-26, 0, 4] as [number, number, number], loot: { kind: 'ammo', amount: 6 } as LootDrop },
+    { position: [28, 0, -12] as [number, number, number], loot: { kind: 'scrap', amount: 4 } as LootDrop },
+  ], [])
   useFrame((_, dt) => { timeRef.current = (timeRef.current + dt * 0.002) % 1; if (daylight.current) daylight.current.intensity = 0.12 + Math.max(0, Math.sin(timeRef.current * Math.PI * 2)) * 1.3 })
   return <><fog attach="fog" args={['#99a18b', 28, 92]} /><ambientLight intensity={0.55} /><directionalLight ref={daylight} position={[15, 20, 10]} intensity={1.15} castShadow shadow-mapSize={[1024, 1024]} />
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]} receiveShadow><planeGeometry args={[120, 120]} /><meshStandardMaterial color="#626850" roughness={1} /></mesh>
@@ -138,6 +172,7 @@ function World({ perspective, onStats, onMessage }: WorldProps) {
     {lamps.map((p, i) => <StreetLamp key={`lamp-${i}`} position={p} broken={i !== 1} />)}
     {mailboxes.map((p, i) => <Mailbox key={`mail-${i}`} position={p} rotation={i % 2 ? -0.15 : 0.12} />)}
     {barrels.map((p, i) => <Barrel key={`barrel-${i}`} position={p} />)}
+    {lootCaches.map((cache, i) => <LootContainer key={`cache-${i}`} position={cache.position} loot={cache.loot} variant={i} />)}
     {poles.map((p, i) => <PowerPole key={`pole-${i}`} position={p} />)}
     <Line points={[[-8, 7.45, -40], [-8, 6.8, -14], [-8, 6.8, 14], [-8, 7.45, 40]]} color="#292d2b" lineWidth={1} /><Line points={[[8, 7.45, -40], [8, 6.8, -14], [8, 6.8, 14], [8, 7.45, 40]]} color="#292d2b" lineWidth={1} />
     <WaterTower position={[39, 0, -39]} />
@@ -151,47 +186,70 @@ function World({ perspective, onStats, onMessage }: WorldProps) {
 function WastelandFallback() {
   const trees = [{ left: '3%', scale: 1.25 }, { left: '25%', scale: 0.82 }, { left: '74%', scale: 0.9 }, { left: '92%', scale: 1.2 }]
   const infected = [{ left: '43%', scale: 0.74 }, { left: '53%', scale: 0.86 }, { left: '64%', scale: 0.66 }]
-  return <div className="scene-fallback" aria-hidden="true"><div className="scene-sky" /><div className="scene-ridge scene-ridge-back" /><div className="scene-ridge scene-ridge-front" /><div className="scene-ground" /><div className="scene-road"><i /><b /><b /><b /></div><div className="scene-home scene-home-left"><i /><b /><em /><span /></div><div className="scene-home scene-home-right"><i /><b /><em /><span /></div>{trees.map((tree, i) => <div className="scene-tree" key={i} style={{ left: tree.left, transform: `scale(${tree.scale})` }}><i /><b /></div>)}<div className="scene-car scene-car-left"><i /><b /></div><div className="scene-car scene-car-right"><i /><b /></div><div className="scene-pole scene-pole-left"><i /><b /></div><div className="scene-pole scene-pole-right"><i /><b /></div><div className="scene-wire" /><div className="scene-tower"><i /><b /></div>{infected.map((zombie, i) => <div className="scene-zombie" key={i} style={{ left: zombie.left, transform: `scale(${zombie.scale})` }}><i /><b /><em /><span /></div>)}<div className="scene-haze" /></div>
+  return <div className="scene-fallback" aria-hidden="true"><div className="scene-sky" /><div className="scene-ridge scene-ridge-back" /><div className="scene-ridge scene-ridge-front" /><div className="scene-ground" /><div className="scene-road"><i /><b /><b /><b /></div><div className="scene-home scene-home-left"><i /><b /><em /><span /></div><div className="scene-home scene-home-right"><i /><b /><em /><span /></div>{trees.map((tree, i) => <div className="scene-tree" key={i} style={{ left: tree.left, transform: `scale(${tree.scale})` }}><i /><b /></div>)}<div className="scene-car scene-car-left"><i /><b /></div><div className="scene-car scene-car-right"><i /><b /></div><div className="scene-pole scene-pole-left"><i /><b /></div><div className="scene-pole scene-pole-right"><i /><b /></div><div className="scene-wire" /><div className="scene-tower"><i /><b /></div><div className="scene-cache scene-cache-left"><i /><b /></div><div className="scene-cache scene-cache-right"><i /><b /></div>{infected.map((zombie, i) => <div className="scene-zombie" key={i} style={{ left: zombie.left, transform: `scale(${zombie.scale})`, animationDelay: `${i * 0.42}s` }}><i /><b /><em /><span /></div>)}<div className="scene-haze" /></div>
 }
 
 type SceneBoundaryState = { failed: boolean }
-class SceneBoundary extends Component<{ children: React.ReactNode }, SceneBoundaryState> {
+class SceneBoundary extends Component<{ children: React.ReactNode; onFailure: () => void }, SceneBoundaryState> {
   state: SceneBoundaryState = { failed: false }
   static getDerivedStateFromError(): SceneBoundaryState { return { failed: true } }
+  componentDidCatch() { this.props.onFailure() }
   render() { return this.state.failed ? <WastelandFallback /> : this.props.children }
 }
 
 function Meter({ label, value, color, icon: Icon }: { label: string; value: number; color: string; icon: typeof Heart }) { return <div className="meter"><div className="meter-label"><span><Icon size={13} strokeWidth={2.2} />{label}</span><b>{Math.round(value)}%</b></div><div className="meter-track"><div className="meter-fill" style={{ width: `${value}%`, backgroundColor: color }} /></div></div> }
 
 export default function Game() {
-  const [stats, setStats] = useState<Stats>(INITIAL); const [perspective, setPerspective] = useState(false); const [time, setTime] = useState(8.25); const [message, setMessage] = useState(''); const [sound, setSound] = useState(true); const [targeting, setTargeting] = useState(false)
-  const [materials, setMaterials] = useState(14); const [gameDay, setGameDay] = useState(3); const [graphicsAvailable, setGraphicsAvailable] = useState(false)
+  const [stats, setStats] = useState<Stats>(INITIAL); const [inventory, setInventory] = useState<Inventory>(INITIAL_INVENTORY); const [perspective, setPerspective] = useState(false); const [time, setTime] = useState(8.25); const [message, setMessage] = useState(''); const [sound, setSound] = useState(true); const [targeting, setTargeting] = useState(false)
+  const [gameDay, setGameDay] = useState(3); const [graphicsAvailable, setGraphicsAvailable] = useState(false); const [sceneFailed, setSceneFailed] = useState(false); const [fallbackCaches, setFallbackCaches] = useState(5)
   useEffect(() => {
     const probe = document.createElement('canvas')
     let context: WebGLRenderingContext | WebGL2RenderingContext | null = null
     try { context = probe.getContext('webgl2') ?? probe.getContext('webgl') } catch { context = null }
-    const available = context !== null
-    setGraphicsAvailable(available)
+    setGraphicsAvailable(context !== null)
   }, [])
   const addMessage = useCallback((text: string) => { setMessage(text); window.setTimeout(() => setMessage(''), 2400) }, [])
-  useEffect(() => { try { const saved = localStorage.getItem('deadzone-save'); if (saved) { const data = JSON.parse(saved); if (data.stats) setStats({ ...INITIAL, ...data.stats }); if (typeof data.materials === 'number') setMaterials(data.materials); if (typeof data.gameDay === 'number') setGameDay(data.gameDay) } } catch { /* Invalid save data is ignored. */ } }, [])
+  const collectLoot = useCallback((loot: LootDrop) => {
+    if (loot.kind === 'ammo') { setStats(state => ({ ...state, ammo: state.ammo + loot.amount })); return }
+    const kind = loot.kind as keyof Inventory
+    setInventory(state => ({ ...state, [kind]: state[kind] + loot.amount }))
+  }, [])
+  useEffect(() => { try { const saved = localStorage.getItem('deadzone-save'); if (saved) { const data = JSON.parse(saved); if (data.stats) setStats({ ...INITIAL, ...data.stats }); if (data.inventory) setInventory({ ...INITIAL_INVENTORY, ...data.inventory }); if (typeof data.gameDay === 'number') setGameDay(data.gameDay) } } catch { /* Invalid save data is ignored. */ } }, [])
   useEffect(() => { const id = window.setInterval(() => { setTime(t => { const next = (t + 0.008) % 24; if (next < t) setGameDay(d => d + 1); return next }) }, 1000); return () => window.clearInterval(id) }, [])
-  useEffect(() => { try { localStorage.setItem('deadzone-save', JSON.stringify({ stats, materials, gameDay })) } catch { /* Storage may be unavailable in private browsing. */ } }, [stats, materials, gameDay])
-  const attack = (ranged: boolean) => { if (ranged && !stats.ammo) { addMessage('OUT OF AMMO — find a supply cache'); return } if (ranged) setStats(s => ({ ...s, ammo: s.ammo - 1 })); window.dispatchEvent(new CustomEvent('deadzone-attack', { detail: { ranged } })) }
-  const reset = () => { setStats(INITIAL); setMaterials(14); setGameDay(3); addMessage('Survival record restored') }
+  useEffect(() => { try { localStorage.setItem('deadzone-save', JSON.stringify({ stats, inventory, gameDay })) } catch { /* Storage may be unavailable in private browsing. */ } }, [stats, inventory, gameDay])
+  const attack = (ranged: boolean) => { if (ranged && !stats.ammo) { addMessage('OUT OF AMMO — search a supply cache'); return } if (ranged) setStats(s => ({ ...s, ammo: s.ammo - 1 })); window.dispatchEvent(new CustomEvent('deadzone-attack', { detail: { ranged } })) }
+  const consume = (kind: 'ration' | 'water' | 'bandage') => {
+    if (!inventory[kind]) { addMessage(`NO ${kind.toUpperCase()} LEFT`); return }
+    setInventory(state => ({ ...state, [kind]: state[kind] - 1 }))
+    if (kind === 'ration') setStats(state => ({ ...state, hunger: Math.min(100, state.hunger + 36) }))
+    if (kind === 'water') setStats(state => ({ ...state, thirst: Math.min(100, state.thirst + 42) }))
+    if (kind === 'bandage') setStats(state => ({ ...state, health: Math.min(100, state.health + 24) }))
+    addMessage(kind === 'ration' ? 'RATION EATEN  ·  HUNGER RESTORED' : kind === 'water' ? 'WATER DRANK  ·  THIRST RESTORED' : 'BANDAGE APPLIED  ·  HEALTH RESTORED')
+  }
+  const reset = () => { setStats(INITIAL); setInventory(INITIAL_INVENTORY); setGameDay(3); setFallbackCaches(5); addMessage('Survival record restored') }
   useEffect(() => {
     const handleAction = (event: KeyboardEvent) => {
       if (event.repeat || (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(event.target.tagName))) return
       if (event.code === 'KeyQ') setTargeting(value => !value)
       if (event.code === 'KeyF') attack(false)
-      if (event.code === 'KeyE') { setMaterials(value => value + 1); addMessage('Scrap recovered  ·  +1 component') }
+      if (event.code === 'KeyE') {
+        if (graphicsAvailable && !sceneFailed) window.dispatchEvent(new Event('deadzone-interact'))
+        else if (fallbackCaches > 0) {
+          const drops: LootDrop[] = [{ kind: 'ration', amount: 1 }, { kind: 'water', amount: 1 }, { kind: 'bandage', amount: 1 }, { kind: 'ammo', amount: 5 }, { kind: 'scrap', amount: 3 }]
+          const drop = drops[(5 - fallbackCaches) % drops.length]
+          setFallbackCaches(count => count - 1); collectLoot(drop); addMessage(`SCAVENGED ${drop.amount} ${drop.kind.toUpperCase()}`)
+        } else addMessage('NO SUPPLY CACHES LEFT')
+      }
+      if (event.code === 'Digit1') consume('ration')
+      if (event.code === 'Digit2') consume('water')
+      if (event.code === 'Digit3') consume('bandage')
       if (event.code === 'KeyV') setPerspective(value => !value)
     }
     window.addEventListener('keydown', handleAction)
     return () => window.removeEventListener('keydown', handleAction)
   })
   const hour = Math.floor(time); const minute = Math.floor((time % 1) * 60); const clock = `${String(hour % 12 || 12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`
-  return <main className="game-shell"><div className="world-canvas"><WastelandFallback />{graphicsAvailable && <SceneBoundary><Canvas className="scene-canvas" shadows dpr={[1, 1.5]} gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}><Suspense fallback={null}><World perspective={perspective} onStats={setStats} onMessage={addMessage} /></Suspense></Canvas></SceneBoundary>}</div>
+  return <main className="game-shell"><div className="world-canvas"><WastelandFallback />{graphicsAvailable && <SceneBoundary onFailure={() => setSceneFailed(true)}><Canvas className="scene-canvas" shadows dpr={[1, 1.5]} gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}><Suspense fallback={null}><World perspective={perspective} onStats={setStats} onMessage={addMessage} onLoot={collectLoot} /></Suspense></Canvas></SceneBoundary>}</div>
     <div className="vignette" aria-hidden="true" />
     <header className="topbar"><div className="brand"><div className="brand-mark">D<span>Z</span></div><div><div className="brand-name">DEADZONE <span>PROTOCOL</span></div><div className="brand-sub">SOUTHERN DISTRICT · SECTOR 04</div></div></div><div className="top-status"><div className="status-live"><i /> LIVE WORLD</div><div className="status-divider" /><div className="day-counter">DAY <b>{String(gameDay).padStart(2, '0')}</b><span> / 07</span></div><div className="clock"><Clock3 size={14} />{clock}</div><button className="icon-button" onClick={() => setSound(!sound)} aria-label={sound ? 'Mute sound' : 'Enable sound'}>{sound ? <Volume2 size={16} /> : <VolumeX size={16} />}</button></div></header>
     <section className="mission-card"><div className="eyebrow"><span className="eyebrow-mark" /> CURRENT OBJECTIVE</div><h1>THE QUIET<br />BEFORE</h1><p>Scavenge the neighborhood.<br />The dead are always listening.</p><div className="mission-line" /><div className="mission-meta"><span><Shield size={13} /> SAFE ZONE</span><span className="danger"><i /> THREAT: LOW</span></div></section>
@@ -200,9 +258,10 @@ export default function Game() {
     <div className="crosshair" aria-hidden="true"><span /><span /><i /></div>
     {message && <div className="toast" role="status">{message}</div>}
     {targeting && <div className="target-overlay"><div className="target-dialog"><div className="eyebrow">TACTICAL TARGETING · AP 68</div><h2>Choose your shot</h2><p>Target analysis ready. Select a zone to queue the attack.</p><div className="target-choices"><button onClick={() => { attack(true); setTargeting(false) }}><Target size={15} /> HEAD <b>72%</b></button><button onClick={() => { attack(true); setTargeting(false) }}><Target size={15} /> TORSO <b>88%</b></button><button onClick={() => { attack(true); setTargeting(false) }}><Target size={15} /> LIMBS <b>64%</b></button></div><button className="cancel-target" onClick={() => setTargeting(false)}>ESC · CANCEL</button></div></div>}
+    <div className="supply-tray" aria-label="Quick-use survival supplies"><button onClick={() => consume('ration')} aria-label={`Use ration, ${inventory.ration} remaining`}><span>FOOD</span><b>{inventory.ration}</b><kbd>1</kbd></button><button onClick={() => consume('water')} aria-label={`Drink water, ${inventory.water} remaining`}><span>WATER</span><b>{inventory.water}</b><kbd>2</kbd></button><button onClick={() => consume('bandage')} aria-label={`Use bandage, ${inventory.bandage} remaining`}><span>MED</span><b>{inventory.bandage}</b><kbd>3</kbd></button></div>
     <div className="center-bottom"><div className="weapon-card"><div className="weapon-icon"><Crosshair size={19} /></div><div className="weapon-info"><span>PRIMARY WEAPON</span><b>SCAVENGED 9MM</b></div><div className="ammo"><strong>{String(stats.ammo).padStart(2, '0')}</strong><span>/ 48</span><span className="ammo-label">AMMO</span></div></div><div className="quick-slots"><button className="quick-slot active" onClick={() => setPerspective(p => !p)} aria-label="Toggle camera view"><span>{perspective ? <EyeOff size={17} /> : <Eye size={17} />}</span><b>VIEW</b><small>V</small></button><button className="quick-slot" onClick={() => attack(false)} aria-label="Melee attack"><span className="melee-icon">╱</span><b>MELEE</b><small>F</small></button><button className="quick-slot" onClick={() => attack(true)} aria-label="Fire weapon"><span><Crosshair size={16} /></span><b>FIRE</b><small>CLICK</small></button><button className="quick-slot" onClick={() => setTargeting(true)} aria-label="Tactical targeting"><span><Target size={17} /></span><b>V.A.T.S.</b><small>Q</small></button></div></div>
-    <div className="resource-chip"><Package size={14} /><span>SCRAP</span><b>{String(materials).padStart(2, '0')}</b><span className="chip-separator" /><span>INFECTED</span><b>{String(Math.max(0, 10 - stats.kills)).padStart(2, '0')}</b></div>
-    <div className="controls-hint"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>MOUSE</kbd> LOOK</span></div>
+    <div className="resource-chip"><Package size={14} /><span>SCRAP</span><b>{String(inventory.scrap).padStart(2, '0')}</b><span className="chip-separator" /><span>INFECTED</span><b>{String(Math.max(0, 10 - stats.kills)).padStart(2, '0')}</b></div>
+    <div className="controls-hint"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>MOUSE</kbd> LOOK</span><span><kbd>E</kbd> SCAVENGE</span><span><kbd>1–3</kbd> SUPPLIES</span></div>
     <div className="corner-mark">DZ<span> / </span>04.17.27</div>
   </main>
 }
