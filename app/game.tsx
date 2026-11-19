@@ -213,8 +213,7 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
   ], [])
   const night = isNight(clock.hour), horde = isHorde(clock)
   const lootCycle = clock.hour >= 6 ? clock.day : clock.day - 1
-  useFrame(() => { if (daylight.current) daylight.current.intensity = night ? 0.18 : 1.2 })
-  return <><color attach="background" args={[night ? '#18232b' : '#99a18b']} /><fog attach="fog" args={[horde ? '#452c2c' : night ? '#18232b' : '#99a18b', 18, night ? 55 : 92]} /><ambientLight intensity={night ? 0.35 : 0.65} /><hemisphereLight args={['#abbcd4', '#33352b', night ? 0.5 : 0.8]} /><directionalLight ref={daylight} position={[15, 20, 10]} castShadow shadow-mapSize={[1024, 1024]} />
+  const environment = useMemo(() => <>
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]} receiveShadow><planeGeometry args={[120, 120]} /><meshStandardMaterial color="#626850" roughness={1} /></mesh>
     <mesh position={[0, 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[6.2, 110]} /><meshStandardMaterial color="#55554b" roughness={1} /></mesh><mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[0.13, 110]} /><meshStandardMaterial color="#b39b67" /></mesh>
     {[-1, 1].map(side => <mesh key={side} position={[side * 4.1, 0.008, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[1.25, 110]} /><meshStandardMaterial color="#777766" roughness={1} /></mesh>)}
@@ -229,6 +228,10 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
     <WaterTower position={[39, 0, -39]} />
     <Car position={[-5.1, 0, 4.5]} color="#82574a" /><Car position={[8.5, 0, -2.6]} color="#6d766e" /><Car position={[-8, 0, 22]} color="#6e634c" /><Car position={[10, 0, -27]} color="#674f47" /><Car position={[31, 0, 7]} color="#797365" />
     {[[-2.7, 0.03, -17], [2.8, 0.03, -8], [-2.4, 0.03, 21], [2.3, 0.03, 31], [-3, 0.03, 39]].map((p, i) => <mesh key={`road-crack-${i}`} position={p as [number, number, number]} rotation={[0, 0, i % 2 ? 0.3 : -0.18]}><boxGeometry args={[0.12, 0.02, 2.7]} /><meshStandardMaterial color="#262b28" /></mesh>)}
+  </>, [houses, trees, grasses, debris, lamps, mailboxes, barrels, lootCaches, lootCycle, poles])
+  useFrame(() => { if (daylight.current) daylight.current.intensity = night ? 0.18 : 1.2 })
+  return <><color attach="background" args={[night ? '#18232b' : '#99a18b']} /><fog attach="fog" args={[horde ? '#452c2c' : night ? '#18232b' : '#99a18b', 18, night ? 55 : 92]} /><ambientLight intensity={night ? 0.35 : 0.65} /><hemisphereLight args={['#abbcd4', '#33352b', night ? 0.5 : 0.8]} /><directionalLight ref={daylight} position={[15, 20, 10]} castShadow shadow-mapSize={[1024, 1024]} />
+    {environment}
     {[...zombies, ...(horde ? Array.from({ length: 18 }, (_, i) => [Math.sin(i * 2.4) * 43, 0, Math.cos(i * 2.4) * 43] as [number, number, number]) : [])].map((z, i) => <Zombie key={i} position={z} index={i} onStats={onStats} playerPosition={playerPosition} active={active} clock={clock} obstacles={obstacles} barriers={barriers} />)}
     <Player perspective={perspective} onStats={onStats} positionTracker={playerPosition} obstacles={obstacles} stats={stats} active={active} aiming={aiming} />
   </>
@@ -281,8 +284,9 @@ export default function Game() {
   }, [])
   useEffect(() => {
     if (!active) return
+    let ticks = 0
     const id = setInterval(() => {
-      setClock(c => advanceClock(c, 0.1))
+      if (++ticks % 10 === 0) setClock(c => advanceClock(c, 1))
       if (reloadProgress.current > 0) {
         reloadProgress.current = Math.max(0, reloadProgress.current - 0.1)
         if (!reloadProgress.current) { setStats(s => ({ ...s, ...reloadAmmo(s.ammo, s.reserve) })); setReloading(false); addMessage('MAGAZINE READY') }
