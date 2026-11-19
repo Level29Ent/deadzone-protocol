@@ -35,6 +35,7 @@ export const BUILDINGS = TOWNS.flatMap((town, ti) => [-1, 1].flatMap(side => [-2
   town: town.id, color: [town.color, '#8b8672', '#8b785f', '#6e7773'][(i + ti) % 4], seed: ti * 8 + i + (side + 1) * 2,
 }))))
 export const WORLD_OBSTACLES = [
+  ...TOWNS.map(t => ({ x: t.x - 12, z: t.z - 30, halfX: 0.9, halfZ: 2 })),
   ...BUILDINGS.map(b => ({ x: b.x, z: b.z, halfX: 3.4, halfZ: 3 })),
   ...TOWNS.map(t => ({ x: t.x + 34, z: t.z + 8, halfX: 6, halfZ: 6 })),
   // The lake is a non-swimmable environmental obstacle. Its bank is walkable.

@@ -24,3 +24,13 @@ export function movementAxes(keys: Record<string, boolean>) {
     side: Number(Boolean(keys.KeyD || keys.ArrowRight)) - Number(Boolean(keys.KeyA || keys.ArrowLeft)),
   }
 }
+
+export function hitDamage(ranged: boolean, headshot: boolean) { return ranged ? headshot ? 3 : 2 : 1 }
+export function detectionRadius({ horde, night, crouched, flashlight }: { horde: boolean; night: boolean; crouched: boolean; flashlight: boolean }) {
+  if (horde) return 95
+  return (night ? 30 : 20) * (crouched && !flashlight ? 0.45 : 1)
+}
+export function craftBandage<T extends { scrap: number; water: number; bandage: number }>(inventory: T): T | null {
+  if (inventory.scrap < 2 || inventory.water < 1) return null
+  return { ...inventory, scrap: inventory.scrap - 2, water: inventory.water - 1, bandage: inventory.bandage + 1 }
+}
