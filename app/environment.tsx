@@ -92,10 +92,21 @@ const TownScene = memo(function TownScene({ town, maps }: { town: Town; maps: Re
 })
 function Scatter() {
   const foliage = useMemo(() => {
-    const pieces = [0, 1, 2].map(i => { const g = new THREE.ConeGeometry(1 - i * 0.22, 1.2, 12, 2); g.translate(0, i * 0.4 - 0.35, 0); return g })
-    const result = mergeGeometries(pieces); pieces.forEach(g => g.dispose()); return result
+    const pieces = [0, 1, 2].map(i => { const g = new THREE.PlaneGeometry(2, 2); g.rotateY(i * Math.PI / 3); return g })
+    const geometry = mergeGeometries(pieces); pieces.forEach(g => g.dispose())
+    const c = document.createElement('canvas'); c.width = 256; c.height = 512; const ctx = c.getContext('2d')!
+    ctx.strokeStyle = '#889077'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(128, 20); ctx.lineTo(128, 505); ctx.stroke()
+    for (let row = 0; row < 43; row++) {
+      const y = 18 + row * 10.5, width = 5 + row * 2.5
+      for (const side of [-1, 1]) {
+        ctx.strokeStyle = '#788268'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(128, y); ctx.lineTo(128 + side * width, y + 27); ctx.stroke()
+        for (let j = 0; j < 26; j++) { const t = j / 26, x = 128 + side * width * t, by = y + 27 * t; ctx.strokeStyle = j % 3 ? '#a0ab89' : '#5d7056'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + side * (4 + random(row * 26 + j) * 10), by + 7 + random(j) * 12); ctx.stroke() }
+      }
+    }
+    const texture = new THREE.CanvasTexture(c); texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = 4
+    return { geometry, texture }
   }, [])
-  useEffect(() => () => foliage.dispose(), [foliage])
+  useEffect(() => () => { foliage.geometry.dispose(); foliage.texture.dispose() }, [foliage])
   const trunks = useRef<THREE.InstancedMesh>(null), leaves = useRef<THREE.InstancedMesh>(null), rocks = useRef<THREE.InstancedMesh>(null), grass = useRef<THREE.InstancedMesh>(null)
   useEffect(() => {
     const matrix = new THREE.Matrix4(), rotation = new THREE.Quaternion(), color = new THREE.Color()
@@ -117,7 +128,7 @@ function Scatter() {
     }
     for (const ref of [trunks, leaves, rocks, grass]) if (ref.current) { ref.current.instanceMatrix.needsUpdate = true; ref.current.computeBoundingSphere(); if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true }
   }, [])
-  return <><instancedMesh ref={trunks} args={[undefined, undefined, 950]}><cylinderGeometry args={[0.18, 0.28, 2, 5]} /><meshStandardMaterial color="#655b47" /></instancedMesh><instancedMesh ref={leaves} args={[foliage, undefined, 950]}><meshStandardMaterial roughness={1} /></instancedMesh><instancedMesh ref={rocks} args={[undefined, undefined, 600]}><icosahedronGeometry args={[1, 0]} /><meshStandardMaterial color="#8b8270" roughness={1} /></instancedMesh><instancedMesh ref={grass} args={[undefined, undefined, 7000]}><coneGeometry args={[0.3, 1, 3]} /><meshStandardMaterial color="#8c9561" side={THREE.DoubleSide} /></instancedMesh></>
+  return <><instancedMesh ref={trunks} args={[undefined, undefined, 950]}><cylinderGeometry args={[0.18, 0.28, 2, 5]} /><meshStandardMaterial color="#655b47" /></instancedMesh><instancedMesh ref={leaves} args={[foliage.geometry, undefined, 950]}><meshStandardMaterial map={foliage.texture} alphaTest={0.3} side={THREE.DoubleSide} roughness={1} /></instancedMesh><instancedMesh ref={rocks} args={[undefined, undefined, 600]}><icosahedronGeometry args={[1, 0]} /><meshStandardMaterial color="#8b8270" roughness={1} /></instancedMesh><instancedMesh ref={grass} args={[undefined, undefined, 7000]}><coneGeometry args={[0.3, 1, 3]} /><meshStandardMaterial color="#8c9561" side={THREE.DoubleSide} /></instancedMesh></>
 }
 function LakeWater() {
   const material = useRef<THREE.MeshStandardMaterial>(null)
@@ -170,7 +181,7 @@ export function Atmosphere({ clock, active, playerPosition, highQuality = false 
   useEffect(() => {
     if (!clouds.current) return
     const matrix = new THREE.Matrix4()
-    for (let i = 0; i < 36; i++) { matrix.makeScale(25 + random(i) * 40, 3 + random(i + 5) * 4, 12 + random(i + 7) * 20); matrix.setPosition((random(i + 1) - 0.5) * 800, 65 + random(i + 10) * 25, (random(i + 3) - 0.5) * 800); clouds.current.setMatrixAt(i, matrix) }
+    for (let i = 0; i < 36; i++) { matrix.makeScale(25 + random(i) * 40, 7 + random(i + 5) * 7, 12 + random(i + 7) * 20); matrix.setPosition((random(i + 1) - 0.5) * 800, 65 + random(i + 10) * 25, (random(i + 3) - 0.5) * 800); clouds.current.setMatrixAt(i, matrix) }
     clouds.current.instanceMatrix.needsUpdate = true; clouds.current.computeBoundingSphere()
   }, [])
   useFrame(({ scene }, delta) => {
@@ -195,7 +206,7 @@ export function Atmosphere({ clock, active, playerPosition, highQuality = false 
   })
   return <><fog attach="fog" args={['#e9d7ad', 50, 320]} /><hemisphereLight ref={hemi} args={['#bad9e8', '#62513c', 1.1]} /><ambientLight intensity={0.2} /><directionalLight key={highQuality ? 'high' : 'balanced'} ref={sun} castShadow shadow-mapSize={highQuality ? [2048, 2048] : [1024, 1024]} shadow-camera-left={-55} shadow-camera-right={55} shadow-camera-top={55} shadow-camera-bottom={-55} shadow-camera-far={220} shadow-normalBias={0.08} />
     <mesh ref={sky} frustumCulled={false}><sphereGeometry args={[700, 24, 16]} /><shaderMaterial side={THREE.BackSide} depthWrite={false} uniforms={uniforms} vertexShader="varying vec3 v; void main(){v=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}" fragmentShader="varying vec3 v; uniform vec3 top; uniform vec3 bottom; void main(){float h=clamp(normalize(v).y*1.6,0.,1.);gl_FragColor=vec4(mix(bottom,top,h),1.);}" /></mesh>
-    <instancedMesh ref={clouds} args={[undefined, undefined, 36]}><sphereGeometry args={[1, 8, 5]} /><meshStandardMaterial color={weather === 'CLEAR' ? '#e2e0cd' : '#899798'} transparent opacity={0.65} depthWrite={false} /></instancedMesh>
+    <instancedMesh ref={clouds} args={[undefined, undefined, 36]}><sphereGeometry args={[1, 20, 12]} /><meshStandardMaterial color={weather === 'CLEAR' ? '#e2e0cd' : '#899798'} transparent opacity={0.65} depthWrite={false} /></instancedMesh>
     <instancedMesh ref={birds} args={[undefined, undefined, 24]} frustumCulled={false} userData={{ decorative: true }}><coneGeometry args={[0.6, 0.5, 3]} /><meshBasicMaterial color="#283932" side={THREE.DoubleSide} /></instancedMesh>
     <points ref={rain} geometry={rainGeometry} visible={weather === 'RAIN'}><pointsMaterial color="#c1d7e1" size={0.06} transparent opacity={0.55} depthWrite={false} /></points>
   </>

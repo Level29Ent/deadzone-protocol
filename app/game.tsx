@@ -84,7 +84,7 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
     camera.rotation.set(pitch.current + kick.current - (perspective ? 0 : 0.16), heading.current + Math.PI, 0, 'YXZ')
     if (camera instanceof THREE.PerspectiveCamera) { camera.fov = THREE.MathUtils.lerp(camera.fov, aiming ? 48 : 70, 1 - Math.exp(-12 * dt)); camera.updateProjectionMatrix() }
     if (weapon.current) { weapon.current.position.copy(camera.position); weapon.current.quaternion.copy(camera.quaternion) }
-    if (lamp.current) { lamp.current.position.copy(eye); lampTarget.position.copy(eye).addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 20); lampTarget.updateMatrixWorld(); lamp.current.target = lampTarget }
+    if (lamp.current) { lamp.current.position.copy(eye).addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 0.45); lampTarget.position.copy(eye).addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 20); lampTarget.updateMatrixWorld(); lamp.current.target = lampTarget }
   })
   return <><group ref={group} userData={{ player: true }}><group visible={!perspective}><Survivor motion={motion} outfit={outfit} /></group></group><group ref={weapon} visible={perspective} userData={{ viewWeapon: true }}><ViewHands outfit={outfit} aiming={aiming} motion={motion} kick={kick} /></group><spotLight ref={lamp} visible={flashlight} color="#ffebce" intensity={36} distance={45} angle={0.35} penumbra={0.6} decay={1} /><primitive object={lampTarget} /></>
 }

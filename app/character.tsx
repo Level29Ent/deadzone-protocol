@@ -14,7 +14,7 @@ export type Outfit = keyof typeof OUTFITS
 export type Motion = { speed: number; crouched: boolean; aiming: boolean; reloading: boolean; active: boolean }
 export const IDLE_MOTION: Motion = { speed: 0, crouched: false, aiming: false, reloading: false, active: false }
 
-type PartProps = { position?: [number, number, number]; scale: [number, number, number]; color: string; rotation?: [number, number, number]; cloth?: boolean; metal?: boolean }
+type PartProps = { position?: [number, number, number]; scale: [number, number, number]; color: string; rotation?: [number, number, number]; cloth?: boolean; metal?: boolean; torso?: boolean }
 function fabricTexture() {
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128
   const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#b9b9b9'; ctx.fillRect(0, 0, 128, 128)
@@ -27,11 +27,13 @@ export const Survivor = memo(function Survivor({ motion, outfit = 'ranger', infe
   const leftKnee = useRef<THREE.Group>(null), rightKnee = useRef<THREE.Group>(null)
   const phase = useRef(variant * 1.7)
   const worldPosition = useMemo(() => new THREE.Vector3(), [])
-  const resources = useMemo(() => ({ box: new RoundedBoxGeometry(1, 1, 1, 2, 0.12), cloth: fabricTexture() }), [])
-  useEffect(() => () => { resources.box.dispose(); resources.cloth.dispose() }, [resources])
+  const resources = useMemo(() => ({ box: new RoundedBoxGeometry(1, 1, 1, 3, 0.2), limb: new THREE.CapsuleGeometry(0.5, 1, 6, 16), torso: new THREE.LatheGeometry([new THREE.Vector2(0.38, -0.5), new THREE.Vector2(0.43, -0.36), new THREE.Vector2(0.48, 0.08), new THREE.Vector2(0.5, 0.32), new THREE.Vector2(0.36, 0.5)], 24), cloth: fabricTexture() }), [])
+  useEffect(() => () => { resources.box.dispose(); resources.limb.dispose(); resources.torso.dispose(); resources.cloth.dispose() }, [resources])
   const palette = OUTFITS[outfit], skin = infected ? '#8b907a' : '#b68c70'
-  const Part = useMemo(() => function Part({ position = [0, 0, 0], scale, color, rotation = [0, 0, 0], cloth, metal }: PartProps) {
-    return <mesh geometry={resources.box} position={position} rotation={rotation} scale={scale} castShadow receiveShadow><meshStandardMaterial color={color} map={cloth ? resources.cloth : undefined} bumpMap={cloth ? resources.cloth : undefined} bumpScale={0.003} roughness={metal ? 0.38 : cloth ? 0.95 : 0.7} metalness={metal ? 0.7 : 0} /></mesh>
+  const Part = useMemo(() => function Part({ position = [0, 0, 0], scale, color, rotation = [0, 0, 0], cloth, metal, torso }: PartProps) {
+    const limb = !torso && scale[1] > scale[0] * 1.5 && scale[1] > 0.2
+    const dimensions: [number, number, number] = limb ? [scale[0], scale[1] / 2, scale[2]] : scale
+    return <mesh geometry={torso ? resources.torso : limb ? resources.limb : resources.box} position={position} rotation={rotation} scale={dimensions} castShadow receiveShadow><meshStandardMaterial color={color} map={cloth ? resources.cloth : undefined} bumpMap={cloth ? resources.cloth : undefined} bumpScale={0.003} roughness={metal ? 0.38 : cloth ? 0.95 : 0.7} metalness={metal ? 0.7 : 0} /></mesh>
   }, [resources])
   useFrame(({ camera }, delta) => {
     if (root.current && infected) { root.current.getWorldPosition(worldPosition); root.current.visible = camera.position.distanceToSquared(worldPosition) < 120 * 120; if (!root.current.visible) return }
@@ -57,7 +59,7 @@ export const Survivor = memo(function Survivor({ motion, outfit = 'ranger', infe
       <Part position={[side * 0.1, -0.18, 0.025]} scale={[0.045, 0.16, 0.14]} color={palette.pack} cloth />
     </group>)}
     <group ref={chest} position={[0, 1, 0]}>
-      <Part position={[0, 0.24, 0]} scale={[0.4, 0.49, 0.255]} color={palette.jacket} cloth />
+      <Part position={[0, 0.24, 0]} scale={[0.42, 0.49, 0.255]} color={palette.jacket} cloth torso />
       <Part position={[0, 0.25, 0.14]} scale={[0.32, 0.35, 0.06]} color={palette.vest} cloth />
       <Part position={[0, 0.42, 0.16]} scale={[0.1, 0.06, 0.015]} color="#b7ae8a" />
       {!infected && <><Part position={[0, 0.27, -0.23]} scale={[0.32, 0.44, 0.23]} color={palette.pack} cloth /><Part position={[0, 0.22, -0.36]} scale={[0.25, 0.24, 0.05]} color={palette.vest} cloth />{[-1, 1].map(side => <group key={side}><Part position={[side * 0.125, 0.28, 0.18]} scale={[0.04, 0.4, 0.025]} color={palette.pack} /><Part position={[side * 0.095, 0.14, 0.205]} scale={[0.1, 0.12, 0.055]} color={palette.pack} cloth /><Part position={[side * 0.125, 0.35, -0.1]} rotation={[0.3 * side, 0, 0]} scale={[0.045, 0.33, 0.2]} color={palette.vest} /></group>)}<Part position={[-0.23, 0.1, -0.22]} scale={[0.09, 0.24, 0.09]} color="#75807a" metal /></>}
@@ -65,7 +67,7 @@ export const Survivor = memo(function Survivor({ motion, outfit = 'ranger', infe
         <Part position={[0, -0.14, 0]} scale={[0.15, 0.32, 0.18]} color={palette.jacket} cloth />
         <group position={[0, -0.29, 0]} rotation={[-0.6, 0, 0]}><Part position={[0, -0.12, 0]} scale={[0.115, 0.27, 0.14]} color={palette.jacket} cloth /><Part position={[0, -0.265, 0.015]} scale={[0.1, 0.12, 0.12]} color={infected ? skin : '#3a3c32'} />{!infected && side === 1 && <group position={[0, -0.29, 0.12]} rotation={[Math.PI / 2, 0, 0]}><Sidearm /></group>}</group>
       </group>)}
-      <Part position={[0, 0.5, 0.01]} scale={[0.12, 0.13, 0.12]} color={skin} />
+      <Part position={[0, 0.5, 0.01]} scale={[0.12, 0.13, 0.12]} color={skin} torso />
       <group ref={head} position={[0, 0.69, 0.01]} userData={infected ? { hitZone: 'head' } : {}}>
         <mesh scale={[0.105, 0.14, 0.105]} castShadow><sphereGeometry args={[1, 20, 16]} /><meshStandardMaterial color={skin} roughness={0.65} /></mesh>
         <Part position={[0, -0.055, 0.015]} scale={[0.15, 0.11, 0.16]} color={skin} />
