@@ -51,3 +51,34 @@ button { font: inherit; color: inherit; }
 .toast { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); padding: 11px 17px; color: #f1e8d1; background: #171a15e8; border: 1px solid #d1b66c66; font: 9px ui-monospace,monospace; letter-spacing: .12em; box-shadow: 0 10px 35px #0005; }.target-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: #10120d78; backdrop-filter: blur(3px); }.target-dialog { width: min(400px,calc(100vw - 32px)); padding: 25px; background: #1b1e19f2; border: 1px solid #d1b66c69; box-shadow: 0 20px 80px #0008; }.target-dialog h2 { margin: 14px 0 8px; font-size: 20px; letter-spacing: .08em; }.target-dialog p { margin: 0 0 18px; color: #aaa795; font-size: 11px; }.target-choices { display: grid; gap: 7px; }.target-choices button { display: flex; align-items: center; gap: 10px; padding: 11px; color: #e6dfcd; background: #ffffff08; border: 1px solid #ffffff20; cursor: pointer; font: 9px ui-monospace,monospace; letter-spacing: .1em; }.target-choices button:hover { border-color: #d1b66c; }.target-choices button svg { color: #d1b66c; }.target-choices button b { margin-left: auto; color: #d1b66c; }.cancel-target { margin-top: 15px; padding: 6px 0; color: #9f9b8b; background: transparent; border: 0; cursor: pointer; font: 8px ui-monospace,monospace; letter-spacing: .12em; }
 @media (max-width: 700px) { .topbar { height: 58px; padding: 0 15px; }.brand { gap: 8px; }.brand-mark { width: 30px; height: 30px; }.brand-name { font-size: 10px; }.brand-sub { font-size: 6px; }.top-status { gap: 9px; font-size: 8px; }.status-live,.status-divider { display: none; }.clock { gap: 4px; }.mission-card { top: 81px; left: 12px; width: 174px; padding: 12px; }.mission-card h1 { font-size: 21px; }.mission-card p { font-size: 9px; }.mission-meta { font-size: 6px; }.survival-panel { top: 81px; right: 12px; width: 160px; padding: 10px; }.panel-heading { font-size: 7px; margin-bottom: 7px; }.meter { margin: 7px 0; }.meter-label { font-size: 7px; }.meter-label svg { width: 11px; }.location-chip { top: auto; bottom: 133px; font-size: 7px; }.coords { display: none; }.center-bottom { bottom: 39px; gap: 5px; }.weapon-card { width: 150px; height: 53px; gap: 6px; padding: 7px; }.weapon-icon { width: 30px; height: 30px; }.weapon-info b { font-size: 7px; }.weapon-info span { font-size: 6px; }.ammo strong { font-size: 16px; }.quick-slot { width: 40px; height: 53px; }.quick-slot b { font-size: 6px; }.quick-slot small { font-size: 5px; }.supply-tray { right: 12px; bottom: 145px; gap: 3px; }.supply-tray button { min-width: 63px; height: 28px; padding: 0 5px; gap: 4px; font-size: 6px; }.resource-chip { right: 12px; bottom: 107px; height: 30px; gap: 5px; font-size: 7px; }.controls-hint { left: 12px; bottom: 13px; gap: 8px; font-size: 6px; }.controls-hint span { gap: 2px; }.controls-hint kbd { min-width: 12px; padding: 2px; font-size: 6px; }.corner-mark { display: none; } }
 @media (max-width: 380px) { .mission-card { width: 150px; }.survival-panel { width: 143px; }.center-bottom { left: 48%; }.weapon-card { width: 132px; }.quick-slot { width: 36px; }.controls-hint { gap: 5px; }.controls-hint span:nth-child(4),.controls-hint span:nth-child(5),.controls-hint span:nth-child(6) { display: none; } }
+
+/* Survival mode controls deliberately leave the center of the world clickable. */
+.topbar { position: relative; z-index: 3; }
+.mission-card, .location-chip, .survival-panel, .crosshair, .controls-hint { pointer-events: none; }
+.crosshair { top: 50%; }
+.crosshair.aiming { transform: translate(-50%,-50%) scale(.65); }
+.cycle-note { margin-top: 12px !important; font-size: 9px !important; color: #d1b66c !important; }
+.craft-tray { position: absolute; left: 36px; bottom: 110px; display: grid; gap: 6px; width: 210px; }
+.craft-tray > span { color: #d1b66c; font: 9px ui-monospace,monospace; letter-spacing: .1em; }
+.craft-tray button { display: flex; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid #ffffff30; background: #171a15df; cursor: pointer; font: 9px ui-monospace,monospace; }
+.craft-tray b { color: #d1b66c; font-weight: 400; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible { outline: 2px solid #dfc575; outline-offset: 3px; }
+.reload-button { border: 0; background: transparent; color: #dfc575; text-align: left; padding: 0; cursor: pointer; font: 8px ui-monospace,monospace; }
+.survival-overlay { position: absolute; inset: 0; z-index: 10 !important; display: grid; place-items: center; overflow: auto; padding: 24px; background: #0b100bba; backdrop-filter: blur(6px); }
+.survival-dialog { width: min(580px,100%); padding: 36px; background: linear-gradient(140deg,#242a20f5,#131813f5); border: 1px solid #c0a36370; box-shadow: 0 30px 100px #0008; }
+.survival-dialog h2 { font-size: clamp(25px,4vw,38px); line-height: 1.05; margin: 22px 0 16px; letter-spacing: .05em; color: #eee7d4; }
+.survival-dialog p { color: #b9baa9; font-size: 13px; line-height: 1.7; }
+.briefing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 24px 0; }
+.briefing-grid span { display: grid; gap: 6px; color: #a5aa96; font-size: 10px; }
+.briefing-grid b { color: #e0cd96; font: 10px ui-monospace,monospace; letter-spacing: .07em; }
+.survival-dialog .session-note { font-size: 10px; }
+.start-survival, .horde-drill { width: 100%; margin-top: 10px; padding: 14px; cursor: pointer; font: 11px ui-monospace,monospace; letter-spacing: .12em; }
+.start-survival { color: #171b12; background: #d1b66c; border: 1px solid #d1b66c; }
+.start-survival:hover { background: #efcf80; }
+.horde-drill { background: transparent; border: 1px solid #ffffff30; color: #c8c7b3; }
+.horde-drill:hover { border-color: #b85b49; color: #efa38a; }
+.horde-active .status-live { color: #ff977c; }
+.horde-active .vignette { box-shadow: inset 0 0 100px #8d261b55; }
+@media(max-width: 900px) { .craft-tray { left: 12px; width: 174px; bottom: 120px; }.controls-hint { gap: 7px; font-size: 7px; }.center-bottom { bottom: 45px; }.mission-card { left: 12px; width: 210px; }.survival-panel { right: 12px; width: 190px; } }
+@media(max-width: 700px) { .game-shell { min-height: 640px; }.survival-dialog { padding: 22px; }.survival-dialog h2 { font-size: 27px; }.survival-dialog p { font-size: 11px; }.mission-card { width: 174px; }.survival-panel { width: 160px; }.mission-card p { font-size: 9px; }.mission-card h1 { font-size: 20px; }.craft-tray { bottom: 200px; width: 155px; }.craft-tray button { font-size: 8px; }.craft-tray > span { font-size: 8px; }.location-chip { bottom: 175px; }.briefing-grid { gap: 12px; } }
