@@ -1,10 +1,12 @@
 'use client'
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Line } from '@react-three/drei'
 import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { advanceClock, blocked, HOUSE_POSITIONS, isHorde, isNight, MAGAZINE, movementAxes, OBSTACLES, reloadAmmo, type Clock, type Obstacle } from './survival'
+import { advanceClock, blocked, isHorde, isNight, MAGAZINE, movementAxes, OBSTACLES, reloadAmmo, type Clock, type Obstacle } from './survival'
+import { Landscape, Atmosphere } from './environment'
+import { nearestTown, spawnAt, terrainHeight, TOWNS, weatherAt, WORLD_LIMIT, type WorldLocation } from './world'
+import { RegionMap } from './region-map'
 import { Crosshair, Heart, Droplets, Utensils, Zap, Clock3, Eye, EyeOff, Shield } from 'lucide-react'
 
 type Stats = { health: number; stamina: number; hunger: number; thirst: number; ammo: number; reserve: number; kills: number }
@@ -13,16 +15,17 @@ type LootDrop = { kind: LootKind; amount: number }
 type Inventory = { ration: number; water: number; bandage: number; scrap: number }
 const INITIAL: Stats = { health: 86, stamina: 78, hunger: 69, thirst: 58, ammo: 12, reserve: 48, kills: 0 }
 const INITIAL_INVENTORY: Inventory = { ration: 1, water: 1, bandage: 1, scrap: 14 }
-type WorldProps = { perspective: boolean; stats: Stats; clock: Clock; active: boolean; aiming: boolean; onStats: React.Dispatch<React.SetStateAction<Stats>>; onMessage: (message: string) => void; onLoot: (loot: LootDrop) => void }
+type WorldProps = { spawnTown: string; onLocation: (location: WorldLocation) => void; perspective: boolean; stats: Stats; clock: Clock; active: boolean; aiming: boolean; onStats: React.Dispatch<React.SetStateAction<Stats>>; onMessage: (message: string) => void; onLoot: (loot: LootDrop) => void }
 
-function Player({ perspective, onStats, positionTracker, obstacles, stats, active, aiming }: Pick<WorldProps, 'perspective' | 'onStats' | 'stats' | 'active' | 'aiming'> & { positionTracker: React.RefObject<THREE.Vector3>; obstacles: React.RefObject<Obstacle[]> }) {
+function Player({ perspective, onStats, positionTracker, obstacles, stats, active, aiming, spawnTown, onLocation }: Pick<WorldProps, 'perspective' | 'onStats' | 'stats' | 'active' | 'aiming' | 'spawnTown' | 'onLocation'> & { positionTracker: React.RefObject<THREE.Vector3>; obstacles: React.RefObject<Obstacle[]> }) {
   const group = useRef<THREE.Group>(null)
   const weapon = useRef<THREE.Group>(null)
   const flash = useRef<THREE.Mesh>(null), kick = useRef(0)
   const { camera, gl, scene } = useThree()
   const keys = useRef<Record<string, boolean>>({})
-  const heading = useRef(0), pitch = useRef(0), jumpVelocity = useRef(0), elapsed = useRef(0)
+  const heading = useRef(0), pitch = useRef(0), jumpVelocity = useRef(0), elapsed = useRef(0), locationTick = useRef(0), jumpHeight = useRef(0)
   const cameraRay = useMemo(() => new THREE.Raycaster(), [])
+  useEffect(() => { if (group.current) group.current.position.set(...spawnAt(spawnTown)); positionTracker.current.set(...spawnAt(spawnTown)); onLocation({ x: positionTracker.current.x, z: positionTracker.current.z, heading: 0 }) }, [spawnTown, positionTracker, onLocation])
   useEffect(() => {
     const down = (event: KeyboardEvent) => { if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault(); keys.current[event.code] = true }
     const up = (event: KeyboardEvent) => { keys.current[event.code] = false }
@@ -50,11 +53,14 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
     if (!blocked(nextX, group.current.position.z, obstacles.current)) group.current.position.x = nextX
     if (!blocked(group.current.position.x, nextZ, obstacles.current)) group.current.position.z = nextZ
     if (active) {
-      if (keys.current.Space && group.current.position.y <= 0.02 && stats.stamina > 8) { jumpVelocity.current = 5.6; onStats(s => ({ ...s, stamina: Math.max(0, s.stamina - 8) })) }
-      jumpVelocity.current -= 13 * dt; group.current.position.y = Math.max(0, group.current.position.y + jumpVelocity.current * dt); if (group.current.position.y === 0) jumpVelocity.current = 0
+      if (keys.current.Space && jumpHeight.current <= 0.02 && stats.stamina > 8) { jumpVelocity.current = 5.6; onStats(s => ({ ...s, stamina: Math.max(0, s.stamina - 8) })) }
+      jumpVelocity.current -= 13 * dt; jumpHeight.current = Math.max(0, jumpHeight.current + jumpVelocity.current * dt); if (jumpHeight.current === 0) jumpVelocity.current = 0
       elapsed.current += dt
       if (elapsed.current >= 1) { elapsed.current = 0; onStats(prev => ({ ...prev, stamina: THREE.MathUtils.clamp(prev.stamina + (sprint ? -9 : 6), 0, 100), hunger: Math.max(0, prev.hunger - 0.09), thirst: Math.max(0, prev.thirst - (sprint ? 0.2 : 0.12)), health: Math.max(0, prev.health - (prev.hunger <= 0 || prev.thirst <= 0 ? 2 : 0)) })) }
     }
+    group.current.position.y = terrainHeight(group.current.position.x, group.current.position.z) + jumpHeight.current
+    locationTick.current += dt
+    if (locationTick.current > 0.3) { locationTick.current = 0; onLocation({ x: group.current.position.x, z: group.current.position.z, heading: heading.current }) }
     group.current.rotation.y = heading.current
     positionTracker.current.copy(group.current.position)
     const eye = group.current.position.clone().add(new THREE.Vector3(0, 1.62, 0))
@@ -62,7 +68,8 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
     if (!perspective) {
       const offset = destination.clone().sub(eye)
       cameraRay.set(eye, offset.clone().normalize()); cameraRay.camera = camera; cameraRay.far = offset.length()
-      const obstruction = cameraRay.intersectObjects(scene.children, true).find(hit => hit.object.userData.cameraSolid && hit.object.visible)
+      const solids: THREE.Object3D[] = []; scene.traverse(o => { if (o.userData.cameraSolid && o.visible) solids.push(o) })
+      const obstruction = cameraRay.intersectObjects(solids, false)[0]
       if (obstruction) destination.copy(eye).addScaledVector(offset.normalize(), Math.max(0.25, obstruction.distance - 0.25))
     }
     camera.position.copy(destination)
@@ -75,46 +82,20 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
   return <><group ref={group} userData={{ player: true }}><group visible={!perspective}><mesh position={[0, 0.9, 0]} castShadow><capsuleGeometry args={[0.3, 0.65, 5, 8]} /><meshStandardMaterial color="#58604b" /></mesh><mesh position={[0, 1.58, 0]} castShadow><sphereGeometry args={[0.23, 8, 6]} /><meshStandardMaterial color="#b6a68b" /></mesh><mesh position={[0, 1.08, -0.27]} castShadow><boxGeometry args={[0.5, 0.65, 0.25]} /><meshStandardMaterial color="#393c31" /></mesh>{[-1, 1].map(side => <mesh key={side} position={[side * 0.18, 0.25, 0]} castShadow><boxGeometry args={[0.2, 0.5, 0.24]} /><meshStandardMaterial color="#34392e" /></mesh>)}<mesh position={[0.34, 1.15, 0.4]} castShadow><boxGeometry args={[0.12, 0.16, 0.65]} /><meshStandardMaterial color="#272d2c" metalness={0.6} roughness={0.4} /></mesh></group></group><group ref={weapon} visible={perspective} userData={{ viewWeapon: true }}><group position={[aiming ? 0 : 0.24, -0.23, -0.46]}><mesh ref={flash} position={[0, 0, -0.24]} visible={false}><octahedronGeometry args={[0.075]} /><meshBasicMaterial color="#ffcf72" /></mesh><mesh><boxGeometry args={[0.09, 0.11, 0.36]} /><meshStandardMaterial color="#343d3b" metalness={0.65} roughness={0.3} /></mesh><mesh position={[0, -0.1, 0.09]} rotation={[-0.2, 0, 0]}><boxGeometry args={[0.08, 0.18, 0.1]} /><meshStandardMaterial color="#4e493a" /></mesh><mesh position={[0, 0.07, -0.13]}><boxGeometry args={[0.025, 0.035, 0.03]} /><meshStandardMaterial color="#c1b77f" /></mesh><mesh position={[0, -0.15, 0.2]}><boxGeometry args={[0.12, 0.1, 0.35]} /><meshStandardMaterial color="#7e8161" /></mesh></group></group></>
 }
 
-function House({ position, color, seed, facing = 0 }: { position: [number, number, number]; color: string; seed: number; facing?: number }) {
-  const lean = seed % 2 ? 0.035 : -0.025
-  const boards = seed % 3 === 0 ? [-1.82, -1.48, -1.14] : [-1.64, -1.3]
-  return <group position={position} rotation={[0, facing + lean, 0]}><mesh userData={{ cameraSolid: true }} position={[0, 1.05, 0]} castShadow receiveShadow><boxGeometry args={[5.5, 2.8, 4.5]} /><meshStandardMaterial color={color} roughness={1} /></mesh><mesh position={[0, 2.85, 0]} rotation={[0, Math.PI / 4, 0]} castShadow><coneGeometry args={[4.1, 1.65, 4]} /><meshStandardMaterial color={seed % 2 ? '#393c35' : '#45463d'} roughness={1} /></mesh><mesh position={[2.15, 1.55, -1.45]} castShadow><boxGeometry args={[0.72, 1.9, 0.72]} /><meshStandardMaterial color="#51483b" /></mesh><mesh position={[-1.5, 1.25, 2.27]}><boxGeometry args={[0.95, 0.95, 0.08]} /><meshStandardMaterial color="#242b29" emissive="#c17538" emissiveIntensity={0.12} /></mesh><mesh position={[0.25, 0.72, 2.31]}><boxGeometry args={[0.92, 1.48, 0.12]} /><meshStandardMaterial color="#504535" /></mesh><mesh position={[0.85, 0.7, 2.38]}><boxGeometry args={[0.08, 0.08, 0.06]} /><meshStandardMaterial color="#b7a179" /></mesh><mesh position={[1.65, 1.25, 2.27]}><boxGeometry args={[0.95, 0.95, 0.08]} /><meshStandardMaterial color="#29312d" /></mesh>{boards.map((x, i) => <mesh key={x} position={[x, 1.25 + (i % 2) * 0.22, 2.34]} rotation={[0, 0, i % 2 ? -0.1 : 0.08]}><boxGeometry args={[0.08, 1.28, 0.12]} /><meshStandardMaterial color="#765e42" /></mesh>)}<mesh position={[0.25, 0.03, 2.6]} castShadow><boxGeometry args={[1.5, 0.14, 0.95]} /><meshStandardMaterial color="#66583f" /></mesh><mesh position={[-1.15, 0.04, 2.45]} rotation={[0.1, 0.2, -0.35]}><boxGeometry args={[1.2, 0.11, 0.62]} /><meshStandardMaterial color="#7b6646" /></mesh></group>
-}
-
-function Tree({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) { return <group position={position} scale={scale}><mesh position={[0, 1.3, 0]} castShadow><cylinderGeometry args={[0.15, 0.27, 2.6, 6]} /><meshStandardMaterial color="#51483a" /></mesh><mesh position={[0, 3, 0]} castShadow><icosahedronGeometry args={[1.25, 1]} /><meshStandardMaterial color="#354435" flatShading /></mesh><mesh position={[0.5, 3.45, -0.1]} castShadow><icosahedronGeometry args={[0.78, 1]} /><meshStandardMaterial color="#46533e" flatShading /></mesh></group> }
-
-function Car({ position, color }: { position: [number, number, number]; color: string }) { return <group position={position} rotation={[0, -0.18, 0]}><mesh userData={{ cameraSolid: true }} position={[0, 0.58, 0]} castShadow><boxGeometry args={[3.2, 0.85, 1.55]} /><meshStandardMaterial color={color} metalness={0.3} roughness={0.8} /></mesh><mesh position={[-0.22, 1.1, 0]} castShadow><boxGeometry args={[1.65, 0.62, 1.35]} /><meshStandardMaterial color="#464e49" roughness={1} /></mesh>{[-1, 1].map(x => [-0.57, 0.57].map(z => <mesh key={`${x}-${z}`} position={[x, 0.28, z]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.32, 0.32, 0.18, 8]} /><meshStandardMaterial color="#171918" /></mesh>))}</group> }
-
-function YardFence({ position, rotation = 0 }: { position: [number, number, number]; rotation?: number }) { return <group position={position} rotation={[0, rotation, 0]}>{Array.from({ length: 7 }, (_, i) => <mesh key={i} position={[(i - 3) * 0.55, 0.62, 0]} rotation={[0, 0, i % 3 === 0 ? 0.08 : 0]} castShadow><boxGeometry args={[0.1, 1.25 - (i % 3) * 0.12, 0.13]} /><meshStandardMaterial color={i % 2 ? '#635941' : '#766348'} roughness={1} /></mesh>)}<mesh position={[0, 0.78, 0]}><boxGeometry args={[4.1, 0.12, 0.12]} /><meshStandardMaterial color="#504936" /></mesh><mesh position={[0, 0.38, 0]}><boxGeometry args={[4.1, 0.1, 0.1]} /><meshStandardMaterial color="#504936" /></mesh></group> }
-
-function WaterTower({ position }: { position: [number, number, number] }) { return <group position={position}><mesh position={[0, 4.3, 0]}><cylinderGeometry args={[0.13, 0.2, 8.6, 6]} /><meshStandardMaterial color="#4d493e" /></mesh>{[-1, 1].map(x => [-1, 1].map(z => <mesh key={`${x}-${z}`} position={[x * 1.2, 4.2, z * 1.2]} rotation={[0, 0, x * 0.18]}><cylinderGeometry args={[0.09, 0.13, 8.2, 5]} /><meshStandardMaterial color="#514b3e" /></mesh>))}<mesh position={[0, 9, 0]} castShadow><cylinderGeometry args={[2.9, 2.35, 2.9, 8]} /><meshStandardMaterial color="#62685a" metalness={0.4} roughness={0.8} /></mesh><mesh position={[0, 10.55, 0]}><coneGeometry args={[3, 0.6, 8]} /><meshStandardMaterial color="#494b42" /></mesh><mesh position={[0, 9, 2.42]}><boxGeometry args={[1.1, 0.42, 0.08]} /><meshStandardMaterial color="#a48953" /></mesh></group> }
-
-function PowerPole({ position }: { position: [number, number, number] }) { return <group position={position}><mesh position={[0, 4, 0]} castShadow><cylinderGeometry args={[0.13, 0.19, 8, 5]} /><meshStandardMaterial color="#4b4438" roughness={1} /></mesh><mesh position={[0, 7.15, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.09, 0.09, 2.4, 5]} /><meshStandardMaterial color="#51483a" /></mesh>{[-0.8, 0, 0.8].map((x, i) => <mesh key={i} position={[x, 7.42, 0]}><cylinderGeometry args={[0.06, 0.08, 0.48, 5]} /><meshStandardMaterial color="#393b36" /></mesh>)}</group> }
-
-function StreetLamp({ position, broken = false }: { position: [number, number, number]; broken?: boolean }) { return <group position={position}><mesh position={[0, 2.5, 0]} castShadow><cylinderGeometry args={[0.08, 0.12, 5, 6]} /><meshStandardMaterial color="#343833" metalness={0.6} roughness={0.8} /></mesh><mesh position={[broken ? 0.2 : 0, 5, 0]} rotation={[0, 0, broken ? -0.28 : 0]}><boxGeometry args={[0.85, 0.12, 0.16]} /><meshStandardMaterial color="#393d37" /></mesh><mesh position={[broken ? 0.48 : 0, 4.92, 0]}><sphereGeometry args={[0.14, 6, 5]} /><meshStandardMaterial color={broken ? '#565348' : '#d4b975'} emissive={broken ? '#000000' : '#c89345'} emissiveIntensity={broken ? 0 : 0.35} /></mesh></group> }
-
-function Mailbox({ position, rotation = 0 }: { position: [number, number, number]; rotation?: number }) { return <group position={position} rotation={[0, rotation, 0]}><mesh position={[0, 0.85, 0]} castShadow><cylinderGeometry args={[0.07, 0.09, 1.7, 5]} /><meshStandardMaterial color="#514b3e" /></mesh><mesh position={[0, 1.55, 0]} castShadow><boxGeometry args={[0.55, 0.38, 0.4]} /><meshStandardMaterial color="#796b52" metalness={0.25} /></mesh><mesh position={[0, 1.52, 0.21]}><boxGeometry args={[0.22, 0.025, 0.012]} /><meshStandardMaterial color="#272b25" /></mesh></group> }
-
-function Debris({ position, rotation = 0, seed = 0 }: { position: [number, number, number]; rotation?: number; seed?: number }) { const color = ['#514e43', '#77705a', '#403f37', '#66583f'][seed % 4]; return <group position={position} rotation={[0, rotation, 0]}><mesh position={[0, 0.12, 0]} rotation={[0.1, 0.2, 0.25]} castShadow><boxGeometry args={[0.9, 0.22, 0.72]} /><meshStandardMaterial color={color} roughness={1} /></mesh><mesh position={[0.62, 0.08, -0.18]} rotation={[0, 0.4, 0.16]}><boxGeometry args={[0.45, 0.14, 0.32]} /><meshStandardMaterial color="#393a33" /></mesh><mesh position={[-0.48, 0.05, 0.27]} rotation={[0, -0.7, 0]}><boxGeometry args={[0.48, 0.1, 0.2]} /><meshStandardMaterial color="#827052" /></mesh></group> }
-
-function GrassClump({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) { return <group position={position} scale={scale}>{[0, 1, 2, 3].map(i => <mesh key={i} position={[(i - 1.5) * 0.09, 0.28 + (i % 2) * 0.08, 0]} rotation={[0, 0, (i - 1.5) * 0.18]}><coneGeometry args={[0.12, 0.68, 4]} /><meshStandardMaterial color={i % 2 ? '#64704a' : '#7b8051'} flatShading /></mesh>)}</group> }
-
-function Barrel({ position }: { position: [number, number, number] }) { return <group position={position}><mesh position={[0, 0.48, 0]} castShadow><cylinderGeometry args={[0.38, 0.4, 0.95, 8]} /><meshStandardMaterial color="#6b5237" metalness={0.45} roughness={0.75} /></mesh><mesh position={[0, 0.22, 0]}><torusGeometry args={[0.39, 0.035, 4, 8]} /><meshStandardMaterial color="#383a34" metalness={0.65} /></mesh><mesh position={[0, 0.76, 0]}><torusGeometry args={[0.38, 0.035, 4, 8]} /><meshStandardMaterial color="#383a34" metalness={0.65} /></mesh></group> }
-
 function LootContainer({ position, loot, variant = 0 }: { position: [number, number, number]; loot: LootDrop; variant?: number }) {
   const colors: Record<LootKind, string> = { ration: '#9e7948', water: '#648b88', bandage: '#9d8b74', ammo: '#7b7655', scrap: '#706957' }
   return <group position={position} userData={{ lootCache: loot }}><mesh position={[0, 0.42, 0]} castShadow><boxGeometry args={[0.9, 0.72, 0.72]} /><meshStandardMaterial color={colors[loot.kind]} roughness={0.92} /></mesh><mesh position={[0, 0.82, 0]} rotation={[0, variant % 2 ? 0.06 : -0.04, 0]} castShadow><boxGeometry args={[0.98, 0.12, 0.8]} /><meshStandardMaterial color="#514b3e" metalness={0.2} /></mesh><mesh position={[0, 0.43, 0.37]}><boxGeometry args={[0.28, 0.18, 0.03]} /><meshStandardMaterial color="#c6b37a" emissive="#a98a4f" emissiveIntensity={0.12} /></mesh><mesh position={[0, 1.05, 0]}><octahedronGeometry args={[0.13, 0]} /><meshBasicMaterial color="#d7bf72" /></mesh></group>
 }
 
 function Zombie({ position, index, onStats, playerPosition, active, clock, obstacles, barriers }: { active: boolean; clock: Clock; obstacles: React.RefObject<Obstacle[]>; barriers: React.RefObject<Barrier[]>; position: [number, number, number]; index: number; onStats: WorldProps['onStats']; playerPosition: React.RefObject<THREE.Vector3> }) {
-  const ref = useRef<THREE.Group>(null); const phase = useRef(index * 1.4); const lastAttack = useRef(0)
+  const ref = useRef<THREE.Group>(null); const wanderHeading = useRef(index * 2.4), wanderTimer = useRef(0); const phase = useRef(index * 1.4); const lastAttack = useRef(0)
   const outfit = ['#596457', '#5c4b43', '#67644c', '#454e4b'][index % 4]
   useFrame((_, delta) => {
     if (!active || !ref.current || !ref.current.visible) return
     const dt = Math.min(delta, 0.05); phase.current += dt
     const dx = playerPosition.current.x - ref.current.position.x; const dz = playerPosition.current.z - ref.current.position.z
     const distance = Math.hypot(dx, dz)
-    const horde = isHorde(clock), night = isNight(clock.hour), alert = horde ? 100 : night ? 24 : 16
+    const horde = isHorde(clock), night = isNight(clock.hour), alert = horde ? 95 : night ? 30 : 20
     const speed = horde ? 2.3 : night ? 1.25 : 0.75
     if (distance < alert && distance > 1.3) {
       const x = ref.current.position.x, z = ref.current.position.z
@@ -125,21 +106,41 @@ function Zombie({ position, index, onStats, playerPosition, active, clock, obsta
       const barrier = barriers.current.find(b => b.hp > 0 && Math.hypot(b.x - x, b.z - z) < 2)
       if (barrier && phase.current - lastAttack.current > 1) { lastAttack.current = phase.current; barrier.hp = Math.max(0, barrier.hp - (horde ? 20 : 10)); if (!barrier.hp) { barrier.mesh.visible = false; obstacles.current = obstacles.current.filter(o => o !== barrier.obstacle) } }
     }
+    if (distance >= alert) {
+      wanderTimer.current += dt
+      if (wanderTimer.current > 5) { wanderTimer.current = 0; wanderHeading.current += 1.7 + Math.sin(phase.current) }
+      const x = ref.current.position.x, z = ref.current.position.z
+      const nx = x + Math.sin(wanderHeading.current) * dt * 0.45, nz = z + Math.cos(wanderHeading.current) * dt * 0.45
+      if (!blocked(nx, nz, obstacles.current, 0.4) && Math.hypot(nx - position[0], nz - position[2]) < 32) { ref.current.position.x = nx; ref.current.position.z = nz; ref.current.rotation.y = wanderHeading.current } else wanderHeading.current += 1.5
+    }
     if (distance < 1.7 && phase.current - lastAttack.current > 1.3) { lastAttack.current = phase.current; onStats(s => ({ ...s, health: Math.max(0, s.health - (horde ? 12 : 7)) })) }
-    ref.current.position.y = Math.abs(Math.sin(phase.current * 3.3)) * (distance < 13 ? 0.025 : 0.012)
+    ref.current.position.y = terrainHeight(ref.current.position.x, ref.current.position.z) + Math.abs(Math.sin(phase.current * 3.3)) * (distance < 13 ? 0.025 : 0.012)
   })
   return <group ref={ref} userData={{ infected: true }} position={position}><mesh position={[0, 0.84, 0]} castShadow><capsuleGeometry args={[0.36, 0.76, 4, 7]} /><meshStandardMaterial color={outfit} roughness={1} /></mesh><mesh position={[0, 1.49, 0]} castShadow><sphereGeometry args={[0.26, 7, 6]} /><meshStandardMaterial color="#91a17c" /></mesh><mesh position={[0.1, 1.52, 0.23]}><sphereGeometry args={[0.06, 6, 5]} /><meshBasicMaterial color="#d54e35" /></mesh><mesh position={[-0.47, 0.86, 0.13]} rotation={[0, 0, -0.24]} castShadow><capsuleGeometry args={[0.11, 0.65, 3, 5]} /><meshStandardMaterial color={outfit} /></mesh><mesh position={[0.47, 0.88, 0.08]} rotation={[0, 0, 0.28]} castShadow><capsuleGeometry args={[0.11, 0.64, 3, 5]} /><meshStandardMaterial color={outfit} /></mesh><mesh position={[-0.19, 0.12, 0]} castShadow><capsuleGeometry args={[0.13, 0.45, 3, 5]} /><meshStandardMaterial color="#383a32" /></mesh><mesh position={[0.19, 0.12, 0]} castShadow><capsuleGeometry args={[0.13, 0.45, 3, 5]} /><meshStandardMaterial color="#383a32" /></mesh></group>
 }
 
 type Barrier = { x: number; z: number; hp: number; mesh: THREE.Mesh; obstacle: Obstacle }
 
-function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, aiming }: WorldProps) {
+function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, aiming, spawnTown, onLocation }: WorldProps) {
   const obstacles = useRef([...OBSTACLES]); const barriers = useRef<Barrier[]>([])
-  const daylight = useRef<THREE.DirectionalLight>(null)
   const { camera, scene } = useThree()
   const raycaster = useMemo(() => new THREE.Raycaster(), [])
   const zombieHealth = useRef(new WeakMap<THREE.Object3D, number>())
-  const playerPosition = useRef(new THREE.Vector3())
+  const playerPosition = useRef(new THREE.Vector3(...spawnAt(spawnTown)))
+  const [hordeWave, setHordeWave] = useState<[number, number, number][]>([])
+  const [supplyDrop, setSupplyDrop] = useState<{ position: [number, number, number]; id: number } | null>(null)
+  const eventCycle = Math.floor((clock.day * 24 + clock.hour) / 4)
+  const horde = isHorde(clock)
+  useEffect(() => {
+    if (!horde) { setHordeWave([]); return }
+    const p = playerPosition.current
+    setHordeWave(Array.from({ length: 18 }, (_, i) => { const angle = i * 2.4; const x = THREE.MathUtils.clamp(p.x + Math.sin(angle) * 42, -WORLD_LIMIT + 2, WORLD_LIMIT - 2), z = THREE.MathUtils.clamp(p.z + Math.cos(angle) * 42, -WORLD_LIMIT + 2, WORLD_LIMIT - 2); return [x, terrainHeight(x, z), z] }))
+  }, [horde])
+  useEffect(() => {
+    const town = TOWNS[(eventCycle % TOWNS.length + TOWNS.length) % TOWNS.length]
+    setSupplyDrop({ position: [town.x + 3, 0, town.z + 8], id: eventCycle })
+    onMessage(`RADIO · SUPPLY DROP NEAR ${town.name.toUpperCase()} · CHECK MAP`)
+  }, [eventCycle, onMessage])
   useEffect(() => {
     const handleAttack = (event: Event) => {
       if (!active) return
@@ -147,7 +148,7 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
       raycaster.setFromCamera(new THREE.Vector2(0, 0), camera)
       const hit = raycaster.intersectObjects(scene.children, true).find(intersection => {
         let node: THREE.Object3D | null = intersection.object
-        while (node) { if (!node.visible || node.userData.player || node.userData.viewWeapon) return false; node = node.parent }
+        while (node) { if (!node.visible || node.userData.decorative || node.userData.player || node.userData.viewWeapon) return false; node = node.parent }
         return true
       })
       let target: THREE.Object3D | null = hit?.object ?? null
@@ -187,7 +188,7 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
       const x = Math.round(playerPosition.current.x + forward.x * 3), z = Math.round(playerPosition.current.z + forward.z * 3)
       if (blocked(x, z, obstacles.current, 1.6) || barriers.current.filter(b => b.hp > 0).length >= 12) { onMessage('NEED OPEN GROUND · MAX 12 BARRICADES'); return }
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 1.4, 1), new THREE.MeshStandardMaterial({ color: '#856542', roughness: 1 }))
-      mesh.position.set(x, 0.7, z); mesh.castShadow = true; mesh.userData.cameraSolid = true; scene.add(mesh)
+      mesh.position.set(x, terrainHeight(x, z) + 0.7, z); mesh.castShadow = true; mesh.userData.cameraSolid = true; scene.add(mesh)
       const obstacle = { x, z, halfX: 1, halfZ: 0.5 }; obstacles.current.push(obstacle); barriers.current.push({ x, z, hp: 100, mesh, obstacle })
       window.dispatchEvent(new Event('deadzone-built')); onMessage('BARRICADE PLACED · 100 HP · -4 SCRAP')
     }
@@ -195,45 +196,20 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
     return () => window.removeEventListener('deadzone-build', build)
   }, [active, camera, onMessage, scene])
   useEffect(() => () => { barriers.current.forEach(b => { scene.remove(b.mesh); b.mesh.geometry.dispose(); (b.mesh.material as THREE.Material).dispose() }) }, [scene])
-  const houses = useMemo(() => HOUSE_POSITIONS.map(([x, z], i) => ({ position: [x, 0, z] as [number, number, number], color: ['#817c68', '#8c8169', '#6f776d', '#8a7561'][i % 4], seed: i, facing: z > 0 ? Math.PI : 0 })), [])
-  const trees = useMemo(() => Array.from({ length: 46 }, (_, i) => { const angle = i * 2.399; const radius = 14 + (i * 13 % 37); return { position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius] as [number, number, number], scale: 0.7 + i % 4 * 0.15 } }), [])
-  const grasses = useMemo(() => Array.from({ length: 112 }, (_, i) => { const angle = i * 2.41; const radius = 6 + (i * 17 % 41); return { position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius] as [number, number, number], scale: 0.55 + i % 5 * 0.14 } }), [])
-  const debris = useMemo(() => Array.from({ length: 42 }, (_, i) => { const angle = i * 2.17; const radius = 5 + (i * 11 % 38); return { position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius] as [number, number, number], rotation: i * 0.73, seed: i } }), [])
-  const zombies = useMemo(() => [[6, 0, 12], [-7, 0, 15], [12, 0, 7], [-20, 0, -13], [28, 0, 20], [-31, 0, 19], [31, 0, -25], [-35, 0, -22], [8, 0, 33], [42, 0, -8]] as [number, number, number][], [])
-  const lamps = useMemo(() => [[-5.2, 0, -36], [5.2, 0, -14], [-5.2, 0, 12], [5.2, 0, 36]] as [number, number, number][], [])
-  const mailboxes = useMemo(() => [[-13, 0, -22], [13, 0, -21], [-16, 0, -6], [17, 0, -4], [-14, 0, 13], [14, 0, 15], [-13, 0, 31], [14, 0, 32]] as [number, number, number][], [])
-  const barrels = useMemo(() => [[-7.5, 0, -18], [8, 0, -23], [-8, 0, 9], [8, 0, 17], [-30, 0, -3], [30, 0, 4]] as [number, number, number][], [])
-  const poles = useMemo(() => [-40, -14, 14, 40].flatMap(z => [[-8, 0, z], [8, 0, z]] as [number, number, number][]), [])
-  const lootCaches = useMemo(() => [
-    { position: [0, 0, 4.5] as [number, number, number], loot: { kind: 'ration', amount: 2 } as LootDrop },
-    { position: [-14, 0, 13] as [number, number, number], loot: { kind: 'water', amount: 1 } as LootDrop },
-    { position: [12, 0, 25] as [number, number, number], loot: { kind: 'bandage', amount: 1 } as LootDrop },
-    { position: [-26, 0, 4] as [number, number, number], loot: { kind: 'ammo', amount: 18 } as LootDrop },
-    { position: [28, 0, -12] as [number, number, number], loot: { kind: 'scrap', amount: 4 } as LootDrop },
-  ], [])
-  const night = isNight(clock.hour), horde = isHorde(clock)
   const lootCycle = clock.hour >= 6 ? clock.day : clock.day - 1
-  const environment = useMemo(() => <>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]} receiveShadow><planeGeometry args={[120, 120]} /><meshStandardMaterial color="#626850" roughness={1} /></mesh>
-    <mesh position={[0, 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[6.2, 110]} /><meshStandardMaterial color="#55554b" roughness={1} /></mesh><mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[0.13, 110]} /><meshStandardMaterial color="#b39b67" /></mesh>
-    {[-1, 1].map(side => <mesh key={side} position={[side * 4.1, 0.008, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[1.25, 110]} /><meshStandardMaterial color="#777766" roughness={1} /></mesh>)}
-    {houses.map((h, i) => <House key={i} {...h} />)}{trees.map((t, i) => <Tree key={i} {...t} />)}{grasses.map((g, i) => <GrassClump key={`grass-${i}`} {...g} />)}{debris.map((d, i) => <Debris key={`debris-${i}`} {...d} />)}
-    {houses.slice(0, 8).map((h, i) => <YardFence key={`fence-${i}`} position={[h.position[0] + (i % 2 ? 2.5 : -2.5), 0, h.position[2] + 3.1]} rotation={i % 2 ? -0.08 : 0.08} />)}
-    {lamps.map((p, i) => <StreetLamp key={`lamp-${i}`} position={p} broken={i !== 1} />)}
-    {mailboxes.map((p, i) => <Mailbox key={`mail-${i}`} position={p} rotation={i % 2 ? -0.15 : 0.12} />)}
-    {barrels.map((p, i) => <Barrel key={`barrel-${i}`} position={p} />)}
-    {lootCaches.map((cache, i) => <LootContainer key={`cache-${lootCycle}-${i}`} position={cache.position} loot={cache.loot} variant={i} />)}
-    {poles.map((p, i) => <PowerPole key={`pole-${i}`} position={p} />)}
-    <Line points={[[-8, 7.45, -40], [-8, 6.8, -14], [-8, 6.8, 14], [-8, 7.45, 40]]} color="#292d2b" lineWidth={1} /><Line points={[[8, 7.45, -40], [8, 6.8, -14], [8, 6.8, 14], [8, 7.45, 40]]} color="#292d2b" lineWidth={1} />
-    <WaterTower position={[39, 0, -39]} />
-    <Car position={[-5.1, 0, 4.5]} color="#82574a" /><Car position={[8.5, 0, -2.6]} color="#6d766e" /><Car position={[-8, 0, 22]} color="#6e634c" /><Car position={[10, 0, -27]} color="#674f47" /><Car position={[31, 0, 7]} color="#797365" />
-    {[[-2.7, 0.03, -17], [2.8, 0.03, -8], [-2.4, 0.03, 21], [2.3, 0.03, 31], [-3, 0.03, 39]].map((p, i) => <mesh key={`road-crack-${i}`} position={p as [number, number, number]} rotation={[0, 0, i % 2 ? 0.3 : -0.18]}><boxGeometry args={[0.12, 0.02, 2.7]} /><meshStandardMaterial color="#262b28" /></mesh>)}
-  </>, [houses, trees, grasses, debris, lamps, mailboxes, barrels, lootCaches, lootCycle, poles])
-  useFrame(() => { if (daylight.current) daylight.current.intensity = night ? 0.18 : 1.2 })
-  return <><color attach="background" args={[night ? '#18232b' : '#99a18b']} /><fog attach="fog" args={[horde ? '#452c2c' : night ? '#18232b' : '#99a18b', 18, night ? 55 : 92]} /><ambientLight intensity={night ? 0.35 : 0.65} /><hemisphereLight args={['#abbcd4', '#33352b', night ? 0.5 : 0.8]} /><directionalLight ref={daylight} position={[15, 20, 10]} castShadow shadow-mapSize={[1024, 1024]} />
-    {environment}
-    {[...zombies, ...(horde ? Array.from({ length: 18 }, (_, i) => [Math.sin(i * 2.4) * 43, 0, Math.cos(i * 2.4) * 43] as [number, number, number]) : [])].map((z, i) => <Zombie key={i} position={z} index={i} onStats={onStats} playerPosition={playerPosition} active={active} clock={clock} obstacles={obstacles} barriers={barriers} />)}
-    <Player perspective={perspective} onStats={onStats} positionTracker={playerPosition} obstacles={obstacles} stats={stats} active={active} aiming={aiming} />
+  const lootCaches = useMemo(() => TOWNS.flatMap((town, ti) => [
+    { position: [town.x + 2, 0, town.z - 14] as [number, number, number], loot: { kind: 'ration', amount: town.id === 'sunvale' ? 4 : 2 } as LootDrop },
+    { position: [town.x - 5, 0, town.z + 22] as [number, number, number], loot: { kind: 'water', amount: town.id === 'stillwater' ? 4 : 2 } as LootDrop },
+    { position: [town.x + 8, 0, town.z - 35] as [number, number, number], loot: { kind: 'bandage', amount: town.id === 'pinefall' ? 3 : 1 } as LootDrop },
+    { position: [town.x - 9, 0, town.z - 8] as [number, number, number], loot: { kind: 'ammo', amount: town.id === 'redmesa' ? 30 : 12 } as LootDrop },
+    { position: [town.x + 13, 0, town.z + 33] as [number, number, number], loot: { kind: 'scrap', amount: town.id === 'ashford' ? 12 : 6 } as LootDrop },
+  ].map(cache => ({ ...cache, key: `${ti}-${cache.loot.kind}` }))), [])
+  const zombies = useMemo(() => TOWNS.flatMap(t => Array.from({ length: 6 }, (_, i) => { const x = t.x + (i % 2 ? -1 : 1) * 11.5, z = t.z + 12 + i * 6; return [x, terrainHeight(x, z), z] as [number, number, number] })), [])
+  return <><Landscape /><Atmosphere clock={clock} active={active} playerPosition={playerPosition} />
+    {lootCaches.map((cache, i) => <LootContainer key={`${cache.key}-${lootCycle}`} position={cache.position} loot={cache.loot} variant={i} />)}
+    {supplyDrop && <group key={supplyDrop.id} position={supplyDrop.position}><LootContainer position={[0, 0, 0]} loot={{ kind: 'ammo', amount: 24 }} /><mesh position={[0, 7, 0]} userData={{ decorative: true }}><cylinderGeometry args={[0.3, 0.8, 13, 8]} /><meshBasicMaterial color="#e3a15e" transparent opacity={0.15} depthWrite={false} /></mesh></group>}
+    {[...zombies, ...hordeWave].map((z, i) => <Zombie key={`${i}-${i >= zombies.length ? clock.day - Number(clock.hour < 6) : 'resident'}`} position={z} index={i} onStats={onStats} playerPosition={playerPosition} active={active} clock={clock} obstacles={obstacles} barriers={barriers} />)}
+    <Player perspective={perspective} onStats={onStats} positionTracker={playerPosition} obstacles={obstacles} stats={stats} active={active} aiming={aiming} spawnTown={spawnTown} onLocation={onLocation} />
   </>
 }
 
@@ -254,6 +230,14 @@ class SceneBoundary extends Component<{ children: React.ReactNode; onFailure: ()
 function Meter({ label, value, color, icon: Icon }: { label: string; value: number; color: string; icon: typeof Heart }) { return <div className="meter"><div className="meter-label"><span><Icon size={13} strokeWidth={2.2} />{label}</span><b>{Math.round(value)}%</b></div><div className="meter-track"><div className="meter-fill" style={{ width: `${value}%`, backgroundColor: color }} /></div></div> }
 
 export default function Game() {
+  const [spawnTown, setSpawnTown] = useState('maplewood')
+  const [sessionTown, setSessionTown] = useState('maplewood')
+  const [mapOpen, setMapOpen] = useState(false)
+  const [location, setLocation] = useState<WorldLocation>({ x: 0, z: -148, heading: 0 })
+  const [visited, setVisited] = useState<string[]>([])
+  const reportLocation = useCallback((p: WorldLocation) => { setLocation(p); const t = nearestTown(p.x, p.z); if (Math.hypot(t.x - p.x, t.z - p.z) < 52) setVisited(v => v.includes(t.id) ? v : [...v, t.id]) }, [])
+  const town = nearestTown(location.x, location.z)
+  const inTown = Math.hypot(town.x - location.x, town.z - location.z) < 52
   const [stats, setStats] = useState<Stats>(INITIAL)
   const [inventory, setInventory] = useState<Inventory>(INITIAL_INVENTORY)
   const [perspective, setPerspective] = useState(true)
@@ -303,7 +287,7 @@ export default function Game() {
     request?.catch(() => addMessage('CLICK THE WORLD TO CAPTURE YOUR MOUSE'))
   }
   const start = (hordeDrill = false) => {
-    setStats(INITIAL); setInventory(INITIAL_INVENTORY); setClock({ day: hordeDrill ? 7 : 1, hour: hordeDrill ? 21.5 : 8 }); setSession(v => v + 1)
+    setSessionTown(spawnTown); setVisited([]); setMapOpen(false); setStats(INITIAL); setInventory(INITIAL_INVENTORY); setClock({ day: hordeDrill ? 7 : 1, hour: hordeDrill ? 21.5 : 8 }); setSession(v => v + 1)
     setStarted(true); setPaused(false); setReloading(false); reloadProgress.current = 0; lastAttack.current = 0
     lockMouse(); addMessage(hordeDrill ? 'HORDE DRILL · PREPARE BARRICADES NOW' : 'FIND THE GOLD SUPPLY MARKERS · E TO SEARCH')
   }
@@ -346,7 +330,8 @@ export default function Game() {
     const built = () => { stateRef.current.inventory = { ...stateRef.current.inventory, scrap: stateRef.current.inventory.scrap - 4 }; setInventory(i => ({ ...i, scrap: i.scrap - 4 })) }
     const action = (e: KeyboardEvent) => {
       if (e.repeat || (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(e.target.tagName))) return
-      if (e.code === 'Escape' && started) { setPaused(true); return }
+      if (e.code === 'KeyM' && started) { setMapOpen(v => !v); setPaused(true); return }
+      if (e.code === 'Escape' && started) { setMapOpen(false); setPaused(true); return }
       if (!stateRef.current.active) return
       if (e.code === 'KeyV') setPerspective(v => !v)
       if (e.code === 'KeyR') reload()
@@ -374,18 +359,20 @@ export default function Game() {
   const time = `${String(Math.floor(clock.hour)).padStart(2, '0')}:${String(Math.floor(clock.hour % 1 * 60)).padStart(2, '0')}`
   const unsupported = graphicsChecked && (!graphicsAvailable || sceneFailed)
   return <main className={`game-shell ${horde ? 'horde-active' : ''}`} onContextMenu={e => e.preventDefault()}>
-    <div className="world-canvas"><WastelandFallback />{graphicsAvailable && <SceneBoundary onFailure={() => setSceneFailed(true)}><Canvas className="scene-canvas" shadows dpr={[1, 1.5]} gl={{ alpha: false, antialias: true }} camera={{ position: [0, 1.62, 0], fov: 70 }}><Suspense fallback={null}><World key={session} perspective={perspective} onStats={setStats} onMessage={addMessage} onLoot={collectLoot} stats={stats} clock={clock} active={active} aiming={aiming} /></Suspense></Canvas></SceneBoundary>}</div>
+    <div className="world-canvas"><WastelandFallback />{graphicsAvailable && <SceneBoundary onFailure={() => setSceneFailed(true)}><Canvas className="scene-canvas" shadows dpr={[1, 1.5]} gl={{ alpha: false, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} camera={{ position: [0, 1.62, -148], fov: 70, far: 1000 }}><Suspense fallback={null}><World key={session} spawnTown={sessionTown} onLocation={reportLocation} perspective={perspective} onStats={setStats} onMessage={addMessage} onLoot={collectLoot} stats={stats} clock={clock} active={active} aiming={aiming} /></Suspense></Canvas></SceneBoundary>}</div>
     <div className="vignette" aria-hidden="true" />
-    <header className="topbar"><div className="brand"><div className="brand-mark">D<span>Z</span></div><div><div className="brand-name">DEADZONE <span>PROTOCOL</span></div><div className="brand-sub">SURVIVAL SANDBOX · SINGLE PLAYER</div></div></div><div className="top-status"><div className="status-live"><i />{horde ? 'HORDE NIGHT' : night ? 'AFTER DARK' : 'DAYLIGHT'}</div><div className="day-counter">DAY <b>{String(clock.day).padStart(2, '0')}</b></div><div className="clock"><Clock3 size={14} />{time}</div><button className="icon-button" onClick={() => setPaused(true)} aria-label="Pause game">Ⅱ</button></div></header>
-    <section className="mission-card"><div className="eyebrow"><span className="eyebrow-mark" />{horde ? 'DEFEND YOUR GROUND' : 'SCAVENGE · CRAFT · SURVIVE'}</div><h1>{horde ? <>THE DEAD<br />ARE HERE</> : <>SEVEN DAYS.<br />ONE LIFE.</>}</h1><p>{horde ? 'The horde hunts until 06:00. Barricades buy time. Keep moving.' : 'Search gold-marked caches; they restock at 06:00. Craft ammo and barricades before the seventh night.'}</p><div className="mission-line" /><div className="mission-meta"><span><Shield size={13} /> NO SAFE ZONES</span><span>{horde ? 'THREAT: EXTREME' : night ? 'THREAT: HIGH' : 'THREAT: ACTIVE'}</span></div><p className="cycle-note">6 real minutes per day · Horde at day 7, 22:00</p></section>
-    <div className="location-chip"><span className="location-dot" /> MAPLEWOOD ESTATES <span className="coords">{perspective ? 'FIRST PERSON' : 'THIRD PERSON'}</span></div>
+    <header className="topbar"><div className="brand"><div className="brand-mark">D<span>Z</span></div><div><div className="brand-name">DEADZONE <span>PROTOCOL</span></div><div className="brand-sub">BLACKWATER COUNTY · SIX TOWNS</div></div></div><div className="top-status"><div className="status-live"><i />{horde ? 'HORDE NIGHT' : night ? 'AFTER DARK' : 'DAYLIGHT'}</div><div className="day-counter">DAY <b>{String(clock.day).padStart(2, '0')}</b></div><div className="clock"><Clock3 size={14} />{time}</div><button className="icon-button" onClick={() => setPaused(true)} aria-label="Pause game">Ⅱ</button></div></header>
+    <section className="mission-card"><div className="eyebrow"><span className="eyebrow-mark" />{horde ? 'DEFEND YOUR GROUND' : 'SCAVENGE · CRAFT · SURVIVE'}</div><h1>{horde ? <>THE DEAD<br />ARE HERE</> : <>A WORLD<br />LEFT BEHIND.</>}</h1><p>{horde ? 'The horde hunts until 06:00. Barricades buy time. Keep moving.' : 'Explore six connected towns. Follow the highways, watch the weather, and intercept radio supply drops.'}</p><div className="mission-line" /><div className="mission-meta"><span><Shield size={13} /> NO SAFE ZONES</span><span>{horde ? 'THREAT: EXTREME' : night ? 'THREAT: HIGH' : 'THREAT: ACTIVE'}</span></div><p className="cycle-note">{visited.length}/6 TOWNS DISCOVERED · M: COUNTY MAP</p></section>
+    <div className="location-chip"><span className="location-dot" /> {inTown ? town.name.toUpperCase() : 'BLACKWATER WILDERNESS'} <span className="coords">{perspective ? 'FIRST PERSON' : 'THIRD PERSON'}</span></div>
     <section className="survival-panel"><div className="panel-heading"><span>SURVIVAL STATUS</span><span>{stats.kills} KILLS</span></div><Meter label="HEALTH" value={stats.health} color="#c45a48" icon={Heart} /><Meter label="STAMINA" value={stats.stamina} color="#d5b864" icon={Zap} /><Meter label="HUNGER" value={stats.hunger} color="#b98353" icon={Utensils} /><Meter label="THIRST" value={stats.thirst} color="#6ea7a0" icon={Droplets} /></section>
+    <div className="world-readout"><span>{inTown ? town.biome : `NEAR ${town.name.toUpperCase()}`}</span><span>{weatherAt(clock.day, clock.hour)} · {Math.round(location.x)}, {Math.round(location.z)}</span><button onClick={() => { setMapOpen(true); setPaused(true) }}>M · COUNTY MAP</button></div>
     <div className={`crosshair ${aiming ? 'aiming' : ''}`} aria-hidden="true"><span /><span /><i /></div>
     {message && <div className="toast" role="status">{message}</div>}
     <div className="craft-tray" aria-label="Crafting"><span>FIELD CRAFT · {inventory.scrap} SCRAP</span><button onClick={() => craft(true)} disabled={!active}>B · BARRICADE <b>4 SCRAP</b></button><button onClick={() => craft(false)} disabled={!active}>C · 6 ROUNDS <b>3 SCRAP</b></button></div>
     <div className="supply-tray" aria-label="Quick-use survival supplies"><button onClick={() => consume('ration')} disabled={!active} aria-label={`Use ration, ${inventory.ration} remaining`}>FOOD <b>{inventory.ration}</b><kbd>1</kbd></button><button onClick={() => consume('water')} disabled={!active} aria-label={`Drink water, ${inventory.water} remaining`}>WATER <b>{inventory.water}</b><kbd>2</kbd></button><button onClick={() => consume('bandage')} disabled={!active} aria-label={`Use bandage, ${inventory.bandage} remaining`}>MED <b>{inventory.bandage}</b><kbd>3</kbd></button></div>
     <div className="center-bottom"><div className="weapon-card"><div className="weapon-icon"><Crosshair size={19} /></div><div className="weapon-info"><span>{reloading ? 'RELOADING…' : aiming ? 'AIM DOWN SIGHTS' : 'SCAVENGED 9MM'}</span><button className="reload-button" onClick={reload}>R · RELOAD</button></div><div className="ammo"><strong>{String(stats.ammo).padStart(2, '0')}</strong><span>/ {stats.reserve}</span><span className="ammo-label">LOADED / RESERVE</span></div></div><div className="quick-slots"><button className="quick-slot active" onClick={() => setPerspective(p => !p)} aria-label="Toggle camera view"><span>{perspective ? <Eye size={17} /> : <EyeOff size={17} />}</span><b>{perspective ? 'FPS' : '3PS'}</b><small>V</small></button><button className="quick-slot" onClick={() => attack(false)} aria-label="Melee attack"><span>╱</span><b>MELEE</b><small>F</small></button><button className="quick-slot" onClick={() => attack(true)} aria-label="Fire weapon"><span><Crosshair size={16} /></span><b>FIRE</b><small>LMB</small></button></div></div>
-    <div className="controls-hint"><span><kbd>WASD</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>RMB</kbd> AIM</span><span><kbd>E</kbd> SEARCH</span><span><kbd>ESC</kbd> PAUSE</span></div>
-    {(!started || paused || stats.health <= 0 || unsupported) && <div className="survival-overlay"><section className="survival-dialog"><div className="eyebrow">DEADZONE PROTOCOL · PLAYABLE PROTOTYPE</div><h2>{unsupported ? '3D unavailable' : stats.health <= 0 ? 'YOU DID NOT MAKE IT.' : paused ? 'TAKE A BREATH.' : 'OUTLAST THE DEAD.'}</h2><p>{unsupported ? 'This game needs WebGL hardware acceleration. Enable it in a desktop browser and reload. The background is only a static illustration; gameplay is disabled.' : stats.health <= 0 ? `Survived to day ${clock.day} with ${stats.kills} infected eliminated. Start again with a fresh world.` : 'An original survival sandbox: explore a ruined neighborhood, scavenge supplies, craft defenses, and survive the seventh-night horde. V switches first- and third-person views.'}</p>{!unsupported && <><div className="briefing-grid"><span><b>WASD + MOUSE</b>Move / look · click world to capture</span><span><b>LMB / RMB / R</b>Fire / aim / reload</span><span><b>E / 1 · 2 · 3</b>Scavenge / food · water · med</span><span><b>B / C / F</b>Build / craft ammo / melee</span></div><p className="session-note">Desktop keyboard + mouse · Session-only progress · Buildings are solid exteriors, not enterable.</p>{paused && stats.health > 0 && <button className="start-survival" onClick={() => { setPaused(false); lockMouse() }}>RESUME SURVIVAL →</button>}<button className="start-survival" onClick={() => start()}>{started ? 'RESTART · DAY 1' : 'START SURVIVAL →'}</button><button className="horde-drill" onClick={() => start(true)}>QUICK HORDE DRILL · DAY 7, 21:30</button></>}</section></div>}
+    <div className="controls-hint"><span><kbd>WASD</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>RMB</kbd> AIM</span><span><kbd>E</kbd> SEARCH</span><span><kbd>M</kbd> MAP</span><span><kbd>ESC</kbd> PAUSE</span></div>
+    {mapOpen && <RegionMap location={location} visited={visited} clock={clock} onClose={() => { setMapOpen(false); setPaused(false); lockMouse() }} />}
+    {!mapOpen && (!started || paused || stats.health <= 0 || unsupported) && <div className="survival-overlay"><section className="survival-dialog"><div className="eyebrow">DEADZONE PROTOCOL · PLAYABLE PROTOTYPE</div><h2>{unsupported ? '3D unavailable' : stats.health <= 0 ? 'YOU DID NOT MAKE IT.' : paused ? 'TAKE A BREATH.' : 'SIX TOWNS. NO REFUGE.'}</h2><p>{unsupported ? 'This game needs WebGL hardware acceleration. Enable it in a desktop browser and reload. The background is only a static illustration; gameplay is disabled.' : stats.health <= 0 ? `Survived to day ${clock.day} with ${stats.kills} infected eliminated. Start again with a fresh world.` : 'Explore a seamless 780m-wide county: pine forests, farmland, industrial ruins, wetlands and red-rock hills. Six towns, roaming infected, changing weather and rotating supply drops. V switches FPS / third person; M opens the county map.'}</p>{!unsupported && <><div className="briefing-grid"><span><b>WASD + MOUSE</b>Move / look · click world to capture</span><span><b>LMB / RMB / R</b>Fire / aim / reload</span><span><b>E / 1 · 2 · 3</b>Scavenge / food · water · med</span><span><b>B / C / F</b>Build / craft ammo / melee</span></div><p className="session-note">Single-player simulation · Desktop keyboard + mouse · Session-only progress · Building exteriors only.</p><label className="spawn-picker">STARTING TOWN<select value={spawnTown} onChange={e => setSpawnTown(e.target.value)}>{TOWNS.map(t => <option key={t.id} value={t.id}>{t.name} — {t.biome}</option>)}</select></label>{paused && stats.health > 0 && <button className="start-survival" onClick={() => { setMapOpen(false); setPaused(false); lockMouse() }}>RESUME SURVIVAL →</button>}<button className="start-survival" onClick={() => start()}>{started ? 'RESTART · DAY 1' : 'START SURVIVAL →'}</button><button className="horde-drill" onClick={() => start(true)}>QUICK HORDE DRILL · DAY 7, 21:30</button></>}</section></div>}
   </main>
 }
