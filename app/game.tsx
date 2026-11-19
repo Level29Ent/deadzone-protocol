@@ -61,7 +61,7 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
     const destination = perspective ? eye.clone() : eye.clone().add(new THREE.Vector3(-dirX * (aiming ? 2.8 : 4.8), 1, -dirZ * (aiming ? 2.8 : 4.8)))
     if (!perspective) {
       const offset = destination.clone().sub(eye)
-      cameraRay.set(eye, offset.clone().normalize()); cameraRay.far = offset.length()
+      cameraRay.set(eye, offset.clone().normalize()); cameraRay.camera = camera; cameraRay.far = offset.length()
       const obstruction = cameraRay.intersectObjects(scene.children, true).find(hit => hit.object.userData.cameraSolid && hit.object.visible)
       if (obstruction) destination.copy(eye).addScaledVector(offset.normalize(), Math.max(0.25, obstruction.distance - 0.25))
     }
