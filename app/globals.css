@@ -82,3 +82,30 @@ button:focus-visible { outline: 2px solid #dfc575; outline-offset: 3px; }
 .horde-active .vignette { box-shadow: inset 0 0 100px #8d261b55; }
 @media(max-width: 900px) { .craft-tray { left: 12px; width: 174px; bottom: 120px; }.controls-hint { gap: 7px; font-size: 7px; }.center-bottom { bottom: 45px; }.mission-card { left: 12px; width: 210px; }.survival-panel { right: 12px; width: 190px; } }
 @media(max-width: 700px) { .game-shell { min-height: 640px; }.survival-dialog { padding: 22px; }.survival-dialog h2 { font-size: 27px; }.survival-dialog p { font-size: 11px; }.mission-card { width: 174px; }.survival-panel { width: 160px; }.mission-card p { font-size: 9px; }.mission-card h1 { font-size: 20px; }.craft-tray { bottom: 200px; width: 155px; }.craft-tray button { font-size: 8px; }.craft-tray > span { font-size: 8px; }.location-chip { bottom: 175px; }.briefing-grid { gap: 12px; } }
+
+/* Blackwater County world expansion */
+.world-readout { position: absolute; top: 330px; right: 36px; display: grid; gap: 8px; text-align: right; font: 9px ui-monospace,monospace; letter-spacing: .12em; color: #d1d3bc; text-shadow: 0 1px 4px #000; }
+.world-readout button { justify-self: end; padding: 9px 12px; border: 1px solid #d1b66c55; background: #172019d9; color: #e7ca86; cursor: pointer; font: inherit; }
+.spawn-picker { display: grid; gap: 8px; margin: 18px 0 8px; font: 9px ui-monospace,monospace; color: #d1b66c; letter-spacing: .1em; }
+.spawn-picker select { padding: 11px; border: 1px solid #7d845f; background: #172019; color: #dddcc5; font: 11px ui-monospace,monospace; width: 100%; }
+.survival-dialog { width: min(660px,100%); }
+.survival-dialog h2 { font-size: clamp(25px,3.3vw,36px); }
+.county-map { position: absolute; z-index: 12 !important; inset: 22px; padding: 26px; overflow: auto; border: 1px solid #a6ab7855; background: #0e1915f7; box-shadow: 0 30px 100px #000a; }
+.map-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 1px solid #ffffff20; padding-bottom: 15px; }
+.map-heading h2 { font-size: 26px; letter-spacing: .12em; margin: 10px 0; }
+.map-heading p { color: #a9b59c; margin: 0; font: 11px ui-monospace,monospace; }
+.map-heading button { padding: 12px 18px; color: #172019; background: #d1b66c; border: 0; cursor: pointer; white-space: nowrap; font: 11px ui-monospace,monospace; }
+.map-content { display: grid; grid-template-columns: minmax(0,1fr) 250px; gap: 28px; max-width: 1150px; margin: 0 auto; }
+.map-content svg { width: 100%; max-height: calc(100svh - 210px); min-height: 320px; }
+.map-content aside { padding: 16px 0; }
+.map-content h3 { color: #d6c895; font: 10px ui-monospace,monospace; letter-spacing: .12em; }
+.map-content p { color: #9cab96; font-size: 11px; line-height: 1.7; }
+.radio-report { display: grid; gap: 10px; padding: 15px; margin: 18px 0; background: #bd854b13; border: 1px solid #dfb06940; font: 10px ui-monospace,monospace; }
+.radio-report b { color: #e3b26b; font-size: 9px; }.radio-report small { color: #a3af96; line-height: 1.6; }
+.town-entry { display: flex; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid #ffffff12; font: 10px ui-monospace,monospace; }
+.town-entry small { font-size: 8px; color: #a6b19a; }
+@media(max-height:780px) { .survival-dialog { padding: 22px 30px; }.survival-dialog h2 { margin: 15px 0; }.survival-dialog p { margin: 8px 0; }.briefing-grid { margin: 16px 0; gap: 12px; }.start-survival,.horde-drill { padding: 11px; } }
+@media(max-width:900px) { .world-readout { right: 12px; top: 300px; }.map-content { grid-template-columns: 1fr 205px; gap: 12px; }.county-map { inset: 10px; padding: 16px; } }
+@media(max-width:700px) { .world-readout { top: 265px; font-size: 8px; }.map-content { grid-template-columns: 1fr; }.map-content svg { max-height: 65vh; }.map-heading h2 { font-size: 17px; }.map-heading p { font-size: 9px; }.map-heading button { padding: 10px; font-size: 9px; }.county-map { padding: 12px; }.survival-dialog { padding: 22px; }.world-readout span:first-child { max-width: 140px; line-height: 1.6; } }
+
+.brand-mark { display: flex; justify-content: center; align-items: center; flex-shrink: 0; white-space: nowrap; }
