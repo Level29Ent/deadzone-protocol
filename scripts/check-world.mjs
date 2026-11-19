@@ -55,4 +55,30 @@ check(bag, { scrap: 2, water: 1, bandage: 0, ration: 3 }, 'craft does not mutate
 check(survival.craftBandage({ scrap: 1, water: 1, bandage: 0 }), null, 'insufficient scrap rejected')
 check(survival.craftBandage({ scrap: 9, water: 0, bandage: 0 }), null, 'insufficient water rejected')
 for (const t of TOWNS) check(blocked(t.x - 12, t.z - 30, OBSTACLES), true, 'abandoned vehicle collision')
+const campaignModule = await import(compile((await readFile(new URL('../app/campaign.ts', import.meta.url), 'utf8')).replace("'./world'", JSON.stringify(worldUrl))))
+const { NEW_CAMPAIGN, RELAYS, EXTRACTION, repairRelay, canExtract, objectiveAt, bearingTo } = campaignModule
+let campaign = { ...NEW_CAMPAIGN, repaired: [] }, scrap = 30
+check(RELAYS.length, 6, 'one relay per town')
+check(canExtract(campaign), false, 'extraction locked initially')
+check(repairRelay(campaign, 'maplewood', 2), null, 'cannot repair without scrap')
+check(repairRelay(campaign, 'unknown', 20), null, 'unknown relay rejected')
+for (const relay of RELAYS) {
+  check(blocked(relay.x, relay.z, OBSTACLES), false, 'relay accessible from road')
+  const result = repairRelay(campaign, relay.id, scrap)
+  assert.ok(result); checks++
+  check(result.reserveReward, 12, 'ammo reward')
+  check(result.waterReward, 1, 'water reward')
+  check(result.scrap, scrap - 3, 'exact repair cost')
+  campaign = result.campaign; scrap = result.scrap
+  check(repairRelay(campaign, relay.id, scrap), null, 'no duplicate rewards')
+}
+check(canExtract(campaign), true, 'all relays unlock extraction')
+check(objectiveAt(campaign, 0, 0).id, 'extraction', 'objective changes at six relays')
+check(objectiveAt(NEW_CAMPAIGN, 0, -148).id, 'maplewood', 'nearest offline relay selected')
+check(blocked(EXTRACTION.x, EXTRACTION.z, OBSTACLES), false, 'extraction accessible')
+check(canExtract({ ...campaign, extracted: true }), false, 'completed run cannot extract twice')
+check(repairRelay({ ...campaign, extracted: true }, 'maplewood', 30), null, 'completed run immutable')
+check(NEW_CAMPAIGN.repaired, [], 'new campaign template unchanged')
+check(bearingTo(0, 0, 0, 0, 10), 0, 'straight ahead bearing')
+check(bearingTo(0, 0, 0, 10, 0), 90, 'left bearing matches positive heading')
 console.log(`${checks} world/survival checks passed; 6,241 terrain samples finite.`)

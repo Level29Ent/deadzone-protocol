@@ -73,3 +73,17 @@ The survivor and infected now use proportioned articulated bodies with facial fe
 Environment changes include higher-resolution generated surface relief, stained/clapboard siding, weathered asphalt and roof tiles, layered pine foliage, gutters/downspouts, collidable abandoned cars, procedural environment reflections and darker/wetter road surfaces during rain. Ambient fill and reflections now dim at night.
 
 These are original procedural assets and browser-friendly PBR-style materials, **not photoreal scanned assets or a full realistic art replacement**. No downloaded character models or external texture services are used. Photorealism, full skeletal/IK animation, interiors, sound, save persistence, multiplayer and realistic physics remain out of scope. The first-person reload is an animated pose, not a physical magazine simulation.
+
+## Operation Dead Air — county campaign
+
+Every fresh survival session now has a complete objective loop:
+
+1. Find the field radio relay on the main road in each town (8m ahead of the starting position).
+2. Get within 2.6m and press **E** to repair it for **3 scrap**. Each relay can reward you only once: **12 reserve rounds and 1 water**. Repairing relays does not make a town safe.
+3. Restore all six, in any order. The HUD points to the nearest offline relay; the atlas shows gold offline / green online markers and exact relay status for each settlement.
+4. Reach the **north highway checkpoint** at (0, -185). Within its marked circle, press **E** to complete extraction. It stays locked until all six relays are online.
+5. Review the completed-run summary or start a new county run. Extraction freezes survival simulation; restarting resets relays, rewards, resources, enemies, clock and world state together.
+
+Nearby contextual prompts cover relay repair, cache searches and extraction. Relays take interaction priority over caches. The navigation arrow rotates relative to the player's look direction; distance is in world meters. Starting-town selection is not fast travel and a restart never retains campaign progress. Progress is still session-only. Extraction is an immediate radio-confirmed ending, not a helicopter cinematic or timed defense event.
+
+Validation adds campaign checks for repair costs, duplicate reward prevention, unknown IDs, all six accessible relay sites, extraction gating, fresh template immutability, nearest objectives and navigation bearings. Long-session balance and a full six-town browser playthrough still require testing.
