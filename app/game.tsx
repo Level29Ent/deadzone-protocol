@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { advanceClock, blocked, HOUSE_POSITIONS, isHorde, isNight, MAGAZINE, OBSTACLES, reloadAmmo, type Clock, type Obstacle } from './survival'
+import { advanceClock, blocked, HOUSE_POSITIONS, isHorde, isNight, MAGAZINE, movementAxes, OBSTACLES, reloadAmmo, type Clock, type Obstacle } from './survival'
 import { Crosshair, Heart, Droplets, Utensils, Zap, Clock3, Eye, EyeOff, Shield } from 'lucide-react'
 
 type Stats = { health: number; stamina: number; hunger: number; thirst: number; ammo: number; reserve: number; kills: number }
@@ -39,8 +39,7 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
   useFrame((_, delta) => {
     if (!group.current) return
     const dt = Math.min(delta, 0.05)
-    const forward = active ? Number(keys.current.KeyW || keys.current.ArrowUp) - Number(keys.current.KeyS || keys.current.ArrowDown) : 0
-    const side = active ? Number(keys.current.KeyD || keys.current.ArrowRight) - Number(keys.current.KeyA || keys.current.ArrowLeft) : 0
+    const { forward, side } = movementAxes(active ? keys.current : {})
     const moving = forward !== 0 || side !== 0
     const sprint = moving && !aiming && stats.stamina > 5 && (keys.current.ShiftLeft || keys.current.ShiftRight)
     const pace = aiming ? 2 : sprint ? 7.1 : 4.1
@@ -63,7 +62,7 @@ function Player({ perspective, onStats, positionTracker, obstacles, stats, activ
     if (!perspective) {
       const offset = destination.clone().sub(eye)
       cameraRay.set(eye, offset.clone().normalize()); cameraRay.far = offset.length()
-      const obstruction = cameraRay.intersectObjects(scene.children, true).find(hit => hit.object.userData.cameraSolid)
+      const obstruction = cameraRay.intersectObjects(scene.children, true).find(hit => hit.object.userData.cameraSolid && hit.object.visible)
       if (obstruction) destination.copy(eye).addScaledVector(offset.normalize(), Math.max(0.25, obstruction.distance - 0.25))
     }
     camera.position.copy(destination)

@@ -20,3 +20,10 @@ export function reloadAmmo(ammo: number, reserve: number) {
   const moved = Math.min(MAGAZINE - ammo, reserve)
   return { ammo: ammo + moved, reserve: reserve - moved }
 }
+
+export function movementAxes(keys: Record<string, boolean>) {
+  return {
+    forward: Number(Boolean(keys.KeyW || keys.ArrowUp)) - Number(Boolean(keys.KeyS || keys.ArrowDown)),
+    side: Number(Boolean(keys.KeyD || keys.ArrowRight)) - Number(Boolean(keys.KeyA || keys.ArrowLeft)),
+  }
+}
