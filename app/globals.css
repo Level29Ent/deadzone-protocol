@@ -109,3 +109,18 @@ button:focus-visible { outline: 2px solid #dfc575; outline-offset: 3px; }
 @media(max-width:700px) { .world-readout { top: 265px; font-size: 8px; }.map-content { grid-template-columns: 1fr; }.map-content svg { max-height: 65vh; }.map-heading h2 { font-size: 17px; }.map-heading p { font-size: 9px; }.map-heading button { padding: 10px; font-size: 9px; }.county-map { padding: 12px; }.survival-dialog { padding: 22px; }.world-readout span:first-child { max-width: 140px; line-height: 1.6; } }
 
 .brand-mark { display: flex; justify-content: center; align-items: center; flex-shrink: 0; white-space: nowrap; }
+
+/* Survivor gear inspection and rendering options */
+.wardrobe { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 18px; padding: 12px; margin: 18px 0; background: #10181395; border: 1px solid #a4b18a30; }
+.avatar-preview { height: 225px; background: radial-gradient(ellipse at 50% 60%,#78836c35,transparent 70%); }
+.wardrobe-options { display: grid; gap: 9px; align-content: center; }
+.wardrobe-options p { font-size: 10px !important; line-height: 1.6 !important; margin: 0 !important; }
+.wardrobe-options label { display: grid; gap: 6px; color: #d0c18f; font: 8px ui-monospace,monospace; letter-spacing: .1em; }
+.wardrobe-options select { width: 100%; padding: 8px; color: #e4e4d1; background: #202b22; border: 1px solid #74815b70; font: 10px ui-monospace,monospace; }
+.wardrobe-options small { color: #a5b297; font: 8px ui-monospace,monospace; line-height: 1.6; }
+.survival-overlay { align-items: start; }
+.survival-dialog { margin: auto; }
+.world-readout strong { color: #d5d1a1; font: 9px ui-monospace,monospace; }
+.dressing-recipe { font-size: 7px !important; line-height: 1.6; color: #bdc7ad !important; }
+.vignette { opacity: .75; }
+@media(max-width:700px) { .wardrobe { grid-template-columns: 115px minmax(0,1fr); padding: 8px; gap: 10px; }.avatar-preview { height: 220px; }.wardrobe-options select { font-size: 9px; padding: 7px; }.controls-hint { flex-wrap: wrap; max-width: 95%; }.world-readout { top: 272px; }.craft-tray { bottom: 210px; } }

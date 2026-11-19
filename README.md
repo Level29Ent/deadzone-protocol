@@ -58,3 +58,18 @@ pnpm dev
 The focused checks cover all six clear spawns, building foundations/collision, infected spawns, flat/unobstructed travel corridors, map boundaries, finite terrain, weather states and core survival regressions. Typecheck is separate because the repository's existing Next config skips build-time type validation.
 
 Browser acceptance: start at every town; verify V, M and pause/resume; search a cache and confirm it cannot be taken twice; craft ammunition/barricades; cross a town boundary along a highway; verify map position/discovery; inspect rain and the horde drill. Long-session balance, full-map traversal, mobile GPUs and a seven-day playthrough require further testing.
+
+
+## Survivor and realism pass
+
+The survivor and infected now use proportioned articulated bodies with facial features, joints, boots, gloves and layered garments. Survivor gear includes a vest, pouches, cap and backpack. Walk/run, breathing, crouching, weapon recoil and reload poses are animated procedurally rather than motion-captured. The pause/start screen has a rotating 3D survivor preview and three cosmetic outfits (ranger/scout/urban), with no armor advantage.
+
+- **X** toggles crouch: slower movement, lower camera/stance and a 55% reduction in normal infected detection range while the flashlight is off. The seventh-night horde ignores stealth.
+- **L** toggles a real spotlight. Using it removes crouch concealment; there is no battery mechanic.
+- **H** crafts one field dressing from two scrap and one water. Use it with **3** like other bandages.
+- Ranged headshots kill in one hit; body shots require two. Melee damage is unchanged. The crosshair remains the authoritative aim point.
+- **Balanced** graphics limits pixel density to 1.25 and sun shadows to 1024; **High** allows pixel density 2 and 2048 sun shadows. Select it in the start/pause screen. Both use distance-culled infected, instanced vegetation and the same gameplay rules.
+
+Environment changes include higher-resolution generated surface relief, stained/clapboard siding, weathered asphalt and roof tiles, layered pine foliage, gutters/downspouts, collidable abandoned cars, procedural environment reflections and darker/wetter road surfaces during rain. Ambient fill and reflections now dim at night.
+
+These are original procedural assets and browser-friendly PBR-style materials, **not photoreal scanned assets or a full realistic art replacement**. No downloaded character models or external texture services are used. Photorealism, full skeletal/IK animation, interiors, sound, save persistence, multiplayer and realistic physics remain out of scope. The first-person reload is an animated pose, not a physical magazine simulation.
