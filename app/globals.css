@@ -107,3 +107,5 @@ button:focus-visible { outline: 2px solid #dfc575; outline-offset: 3px; }
 @media(max-height:780px) { .survival-dialog { padding: 22px 30px; }.survival-dialog h2 { margin: 15px 0; }.survival-dialog p { margin: 8px 0; }.briefing-grid { margin: 16px 0; gap: 12px; }.start-survival,.horde-drill { padding: 11px; } }
 @media(max-width:900px) { .world-readout { right: 12px; top: 300px; }.map-content { grid-template-columns: 1fr 205px; gap: 12px; }.county-map { inset: 10px; padding: 16px; } }
 @media(max-width:700px) { .world-readout { top: 265px; font-size: 8px; }.map-content { grid-template-columns: 1fr; }.map-content svg { max-height: 65vh; }.map-heading h2 { font-size: 17px; }.map-heading p { font-size: 9px; }.map-heading button { padding: 10px; font-size: 9px; }.county-map { padding: 12px; }.survival-dialog { padding: 22px; }.world-readout span:first-child { max-width: 140px; line-height: 1.6; } }
+
+.brand-mark { display: flex; justify-content: center; align-items: center; flex-shrink: 0; white-space: nowrap; }

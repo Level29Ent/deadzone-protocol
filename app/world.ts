@@ -48,3 +48,17 @@ export type WorldLocation = { x: number; z: number; heading: number }
 export function weatherAt(day: number, hour: number): 'CLEAR' | 'OVERCAST' | 'RAIN' {
   return (Math.floor(hour / 4) + day) % 4 === 0 ? 'RAIN' : (Math.floor(hour / 4) + day) % 4 === 1 ? 'OVERCAST' : 'CLEAR'
 }
+
+export function hordeSpawns(x: number, z: number, obstacles = WORLD_OBSTACLES): [number, number, number][] {
+  const spawns: [number, number, number][] = []
+  for (let i = 0; i < 18; i++) {
+    for (let attempt = 0; attempt < 36; attempt++) {
+      const angle = i * 2.4 + attempt * 0.17, radius = 42 + attempt * 0.5
+      const nx = Math.max(-WORLD_LIMIT + 2, Math.min(WORLD_LIMIT - 2, x + Math.sin(angle) * radius))
+      const nz = Math.max(-WORLD_LIMIT + 2, Math.min(WORLD_LIMIT - 2, z + Math.cos(angle) * radius))
+      if (obstacles.some(o => Math.abs(nx - o.x) < o.halfX + 0.5 && Math.abs(nz - o.z) < o.halfZ + 0.5)) continue
+      spawns.push([nx, terrainHeight(nx, nz), nz]); break
+    }
+  }
+  return spawns
+}
