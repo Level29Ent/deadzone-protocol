@@ -9,6 +9,8 @@ import { hordeSpawns, nearestTown, spawnAt, terrainHeight, TOWNS, weatherAt, typ
 import { Survivor, ViewHands, IDLE_MOTION, type Motion, type Outfit } from './character'
 import { Wardrobe } from './wardrobe'
 import { hitDamage, detectionRadius, craftBandage } from './survival'
+import { NEW_CAMPAIGN, RELAYS, RELAY_COST, EXTRACTION, bearingTo, canExtract, objectiveAt, repairRelay, type Campaign } from './campaign'
+import { RelayNetwork } from './relay-network'
 import { RegionMap } from './region-map'
 import { Crosshair, Heart, Droplets, Utensils, Zap, Clock3, Eye, EyeOff, Shield, Pause, Sword } from 'lucide-react'
 
@@ -18,7 +20,7 @@ type LootDrop = { kind: LootKind; amount: number }
 type Inventory = { ration: number; water: number; bandage: number; scrap: number }
 const INITIAL: Stats = { health: 86, stamina: 78, hunger: 69, thirst: 58, ammo: 12, reserve: 48, kills: 0 }
 const INITIAL_INVENTORY: Inventory = { ration: 1, water: 1, bandage: 1, scrap: 14 }
-type WorldProps = { outfit: Outfit; crouched: boolean; flashlight: boolean; reloading: boolean; highQuality: boolean; spawnTown: string; onLocation: (location: WorldLocation) => void; perspective: boolean; stats: Stats; clock: Clock; active: boolean; aiming: boolean; onStats: React.Dispatch<React.SetStateAction<Stats>>; onMessage: (message: string) => void; onLoot: (loot: LootDrop) => void }
+type WorldProps = { campaign: Campaign; onRepair: (id: string) => void; onExtract: () => void; onPrompt: (prompt: string) => void; outfit: Outfit; crouched: boolean; flashlight: boolean; reloading: boolean; highQuality: boolean; spawnTown: string; onLocation: (location: WorldLocation) => void; perspective: boolean; stats: Stats; clock: Clock; active: boolean; aiming: boolean; onStats: React.Dispatch<React.SetStateAction<Stats>>; onMessage: (message: string) => void; onLoot: (loot: LootDrop) => void }
 
 function Player({ perspective, onStats, positionTracker, obstacles, stats, active, aiming, spawnTown, onLocation, outfit, crouched, flashlight, reloading }: Pick<WorldProps, 'perspective' | 'onStats' | 'stats' | 'active' | 'aiming' | 'spawnTown' | 'onLocation' | 'outfit' | 'crouched' | 'flashlight' | 'reloading'> & { positionTracker: React.RefObject<THREE.Vector3>; obstacles: React.RefObject<Obstacle[]> }) {
   const group = useRef<THREE.Group>(null)
@@ -130,7 +132,7 @@ function Zombie({ position, index, onStats, playerPosition, active, clock, obsta
 
 type Barrier = { x: number; z: number; hp: number; mesh: THREE.Mesh; obstacle: Obstacle }
 
-function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, aiming, spawnTown, onLocation, outfit, crouched, flashlight, reloading, highQuality }: WorldProps) {
+function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, aiming, spawnTown, onLocation, outfit, crouched, flashlight, reloading, highQuality, campaign, onRepair, onExtract, onPrompt }: WorldProps) {
   const obstacles = useRef([...OBSTACLES]); const barriers = useRef<Barrier[]>([])
   const { camera, scene } = useThree()
   const raycaster = useMemo(() => new THREE.Raycaster(), [])
@@ -179,6 +181,9 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
   useEffect(() => {
     const handleInteract = () => {
       if (!active) return
+      const relay = RELAYS.find(r => Math.hypot(r.x - playerPosition.current.x, r.z - playerPosition.current.z) < 2.6 && !campaign.repaired.includes(r.id))
+      if (relay) { onRepair(relay.id); return }
+      if (Math.hypot(EXTRACTION.x - playerPosition.current.x, EXTRACTION.z - playerPosition.current.z) < 4.2) { onExtract(); return }
       let nearest: { target: THREE.Object3D; loot: LootDrop; distance: number } | null = null
       scene.traverse(object => {
         const loot = object.userData.lootCache as LootDrop | undefined
@@ -194,7 +199,7 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
     }
     window.addEventListener('deadzone-interact', handleInteract)
     return () => window.removeEventListener('deadzone-interact', handleInteract)
-  }, [active, onLoot, onMessage, scene])
+  }, [active, campaign, onRepair, onExtract, onLoot, onMessage, scene])
   useEffect(() => {
     const build = () => {
       if (!active) return
@@ -210,6 +215,21 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
     return () => window.removeEventListener('deadzone-build', build)
   }, [active, camera, onMessage, scene])
   useEffect(() => () => { barriers.current.forEach(b => { scene.remove(b.mesh); b.mesh.geometry.dispose(); (b.mesh.material as THREE.Material).dispose() }) }, [scene])
+  const promptTick = useRef(0), lastPrompt = useRef('')
+  useFrame((_, delta) => {
+    promptTick.current += Math.min(delta, 0.1)
+    if (promptTick.current < 0.2) return
+    promptTick.current = 0
+    let prompt = ''
+    if (active) {
+      const p = playerPosition.current
+      const relay = RELAYS.find(r => Math.hypot(r.x - p.x, r.z - p.z) < 2.6 && !campaign.repaired.includes(r.id))
+      if (relay) prompt = `E · REPAIR ${relay.name.toUpperCase()} RELAY · ${RELAY_COST} SCRAP`
+      else if (Math.hypot(EXTRACTION.x - p.x, EXTRACTION.z - p.z) < 4.2) prompt = canExtract(campaign) ? 'E · CALL EXTRACTION · LEAVE THE COUNTY' : 'EXTRACTION LOCKED · RESTORE ALL SIX RELAYS'
+      else scene.traverse(o => { if (o.visible && o.userData.lootCache && o.getWorldPosition(new THREE.Vector3()).distanceTo(p) < 3.2) prompt = 'E · SEARCH SUPPLY CACHE' })
+    }
+    if (prompt !== lastPrompt.current) { lastPrompt.current = prompt; onPrompt(prompt) }
+  })
   const lootCycle = clock.hour >= 6 ? clock.day : clock.day - 1
   const lootCaches = useMemo(() => TOWNS.flatMap((town, ti) => [
     { position: [town.x + 2, 0, town.z - 14] as [number, number, number], loot: { kind: 'ration', amount: town.id === 'sunvale' ? 4 : 2 } as LootDrop },
@@ -219,7 +239,7 @@ function World({ perspective, onStats, onMessage, onLoot, stats, clock, active, 
     { position: [town.x + 13, 0, town.z + 33] as [number, number, number], loot: { kind: 'scrap', amount: town.id === 'ashford' ? 12 : 6 } as LootDrop },
   ].map(cache => ({ ...cache, key: `${ti}-${cache.loot.kind}` }))), [])
   const zombies = useMemo(() => TOWNS.flatMap(t => Array.from({ length: 6 }, (_, i) => { const x = t.x + (i % 2 ? -1 : 1) * 11.5, z = t.z + 12 + i * 6; return [x, terrainHeight(x, z), z] as [number, number, number] })), [])
-  return <><Landscape wet={weatherAt(clock.day, clock.hour) === 'RAIN'} /><Atmosphere highQuality={highQuality} clock={clock} active={active} playerPosition={playerPosition} />
+  return <><RelayNetwork campaign={campaign} /><Landscape wet={weatherAt(clock.day, clock.hour) === 'RAIN'} /><Atmosphere highQuality={highQuality} clock={clock} active={active} playerPosition={playerPosition} />
     {lootCaches.map((cache, i) => <LootContainer key={`${cache.key}-${lootCycle}`} position={cache.position} loot={cache.loot} variant={i} />)}
     {supplyDrop && <group key={supplyDrop.id} position={supplyDrop.position}><LootContainer position={[0, 0, 0]} loot={{ kind: 'ammo', amount: 24 }} /><mesh position={[0, 7, 0]} userData={{ decorative: true }}><cylinderGeometry args={[0.3, 0.8, 13, 8]} /><meshBasicMaterial color="#e3a15e" transparent opacity={0.15} depthWrite={false} /></mesh></group>}
     {[...zombies, ...hordeWave].map((z, i) => <Zombie key={`${i}-${i >= zombies.length ? clock.day - Number(clock.hour < 6) : 'resident'}`} position={z} index={i} onStats={onStats} playerPosition={playerPosition} active={active} clock={clock} obstacles={obstacles} barriers={barriers} crouched={crouched} flashlight={flashlight} />)}
@@ -244,6 +264,10 @@ class SceneBoundary extends Component<{ children: React.ReactNode; onFailure: ()
 function Meter({ label, value, color, icon: Icon }: { label: string; value: number; color: string; icon: typeof Heart }) { return <div className="meter"><div className="meter-label"><span><Icon size={13} strokeWidth={2.2} />{label}</span><b>{Math.round(value)}%</b></div><div className="meter-track"><div className="meter-fill" style={{ width: `${value}%`, backgroundColor: color }} /></div></div> }
 
 export default function Game() {
+  const [campaign, setCampaign] = useState<Campaign>({ ...NEW_CAMPAIGN, repaired: [] })
+  const [prompt, setPrompt] = useState('')
+  const campaignRef = useRef(campaign)
+  campaignRef.current = campaign
   const [outfit, setOutfit] = useState<Outfit>('ranger')
   const [crouched, setCrouched] = useState(false), [flashlight, setFlashlight] = useState(false)
   const [highQuality, setHighQuality] = useState(false)
@@ -266,7 +290,7 @@ export default function Game() {
   const [graphicsAvailable, setGraphicsAvailable] = useState(false), [graphicsChecked, setGraphicsChecked] = useState(false), [sceneFailed, setSceneFailed] = useState(false)
   const stateRef = useRef({ stats, inventory, active: false, reloading })
   const reloadProgress = useRef(0), lastAttack = useRef(0), toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const active = started && !paused && stats.health > 0 && graphicsAvailable && !sceneFailed
+  const active = started && !campaign.extracted && !paused && stats.health > 0 && graphicsAvailable && !sceneFailed
   stateRef.current = { stats, inventory, active, reloading }
   const night = isNight(clock.hour), horde = isHorde(clock)
   useEffect(() => {
@@ -278,6 +302,22 @@ export default function Game() {
     return () => { if (toastTimer.current) clearTimeout(toastTimer.current) }
   }, [])
   const addMessage = useCallback((text: string) => { setMessage(text); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setMessage(''), 2600) }, [])
+  const restoreRelay = useCallback((id: string) => {
+    const state = stateRef.current
+    if (!state.active) return
+    const result = repairRelay(campaignRef.current, id, state.inventory.scrap)
+    if (!result) { addMessage(`RELAY REQUIRES ${RELAY_COST} SCRAP · SEARCH OR SAVE MATERIALS`); return }
+    campaignRef.current = result.campaign; setCampaign(result.campaign)
+    state.inventory = { ...state.inventory, scrap: result.scrap, water: state.inventory.water + result.waterReward }
+    setInventory(state.inventory); setStats(s => ({ ...s, reserve: s.reserve + result.reserveReward }))
+    addMessage(`RELAY ONLINE · ${result.campaign.repaired.length}/6 · +12 ROUNDS +1 WATER`)
+  }, [addMessage])
+  const extract = useCallback(() => {
+    if (!stateRef.current.active) return
+    if (!canExtract(campaignRef.current)) { addMessage('RESTORE ALL SIX TOWN RELAYS BEFORE EXTRACTION'); return }
+    const completed = { ...campaignRef.current, extracted: true }; campaignRef.current = completed; setCampaign(completed); setPrompt('')
+    addMessage('SIGNAL RECEIVED · COUNTY RUN COMPLETE')
+  }, [addMessage])
   const collectLoot = useCallback((loot: LootDrop) => {
     if (loot.kind === 'ammo') { setStats(state => ({ ...state, reserve: state.reserve + loot.amount })); return }
     const kind = loot.kind as keyof Inventory
@@ -304,7 +344,7 @@ export default function Game() {
     request?.catch(() => addMessage('CLICK THE WORLD TO CAPTURE YOUR MOUSE'))
   }
   const start = (hordeDrill = false) => {
-    setCrouched(false); setFlashlight(false); setSessionTown(spawnTown); setVisited([]); setMapOpen(false); setStats(INITIAL); setInventory(INITIAL_INVENTORY); setClock({ day: hordeDrill ? 7 : 1, hour: hordeDrill ? 21.5 : 8 }); setSession(v => v + 1)
+    const fresh = { ...NEW_CAMPAIGN, repaired: [] }; campaignRef.current = fresh; setCampaign(fresh); setPrompt(''); setCrouched(false); setFlashlight(false); setSessionTown(spawnTown); setVisited([]); setMapOpen(false); setStats(INITIAL); setInventory(INITIAL_INVENTORY); setClock({ day: hordeDrill ? 7 : 1, hour: hordeDrill ? 21.5 : 8 }); setSession(v => v + 1)
     setStarted(true); setPaused(false); setReloading(false); reloadProgress.current = 0; lastAttack.current = 0
     lockMouse(); addMessage(hordeDrill ? 'HORDE DRILL · PREPARE BARRICADES NOW' : 'FIND THE GOLD SUPPLY MARKERS · E TO SEARCH')
   }
@@ -347,7 +387,7 @@ export default function Game() {
     const built = () => { stateRef.current.inventory = { ...stateRef.current.inventory, scrap: stateRef.current.inventory.scrap - 4 }; setInventory(i => ({ ...i, scrap: i.scrap - 4 })) }
     const action = (e: KeyboardEvent) => {
       if (e.repeat || (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName))) return
-      if (e.code === 'KeyM' && started) { setMapOpen(v => !v); setPaused(true); return }
+      if (e.code === 'KeyM' && started && !campaignRef.current.extracted) { setMapOpen(v => !v); setPaused(true); return }
       if (e.code === 'Escape' && started) { setMapOpen(false); setPaused(true); return }
       if (!stateRef.current.active) return
       if (e.code === 'KeyX') setCrouched(v => !v)
@@ -377,12 +417,17 @@ export default function Game() {
     return () => { window.removeEventListener('keydown', action); window.removeEventListener('mousedown', mouse); window.removeEventListener('mouseup', release); window.removeEventListener('blur', blur); window.removeEventListener('deadzone-built', built); document.removeEventListener('pointerlockchange', unlocked) }
   }, [attack, consume, craft, reload, started])
   const time = `${String(Math.floor(clock.hour)).padStart(2, '0')}:${String(Math.floor(clock.hour % 1 * 60)).padStart(2, '0')}`
+  const objective = objectiveAt(campaign, location.x, location.z)
+  const bearing = bearingTo(location.x, location.z, location.heading, objective.x, objective.z)
   const unsupported = graphicsChecked && (!graphicsAvailable || sceneFailed)
   return <main className={`game-shell ${horde ? 'horde-active' : ''}`} onContextMenu={e => e.preventDefault()}>
-    <div className="world-canvas"><WastelandFallback />{graphicsAvailable && <SceneBoundary onFailure={() => setSceneFailed(true)}><Canvas className="scene-canvas" shadows dpr={highQuality ? [1, 2] : [1, 1.25]} gl={{ alpha: false, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} camera={{ position: [0, 1.62, -148], fov: 70, far: 1000 }}><Suspense fallback={null}><World key={session} outfit={outfit} crouched={crouched} flashlight={flashlight} reloading={reloading} highQuality={highQuality} spawnTown={sessionTown} onLocation={reportLocation} perspective={perspective} onStats={setStats} onMessage={addMessage} onLoot={collectLoot} stats={stats} clock={clock} active={active} aiming={aiming} /></Suspense></Canvas></SceneBoundary>}</div>
+    <div className="world-canvas"><WastelandFallback />{graphicsAvailable && <SceneBoundary onFailure={() => setSceneFailed(true)}><Canvas className="scene-canvas" shadows dpr={highQuality ? [1, 2] : [1, 1.25]} gl={{ alpha: false, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} camera={{ position: [0, 1.62, -148], fov: 70, far: 1000 }}><Suspense fallback={null}><World key={session} campaign={campaign} onRepair={restoreRelay} onExtract={extract} onPrompt={setPrompt} outfit={outfit} crouched={crouched} flashlight={flashlight} reloading={reloading} highQuality={highQuality} spawnTown={sessionTown} onLocation={reportLocation} perspective={perspective} onStats={setStats} onMessage={addMessage} onLoot={collectLoot} stats={stats} clock={clock} active={active} aiming={aiming} /></Suspense></Canvas></SceneBoundary>}</div>
     <div className="vignette" aria-hidden="true" />
     <header className="topbar"><div className="brand"><div className="brand-mark">D<span>Z</span></div><div><div className="brand-name">DEADZONE <span>PROTOCOL</span></div><div className="brand-sub">BLACKWATER COUNTY · SIX TOWNS</div></div></div><div className="top-status"><div className="status-live"><i />{horde ? 'HORDE NIGHT' : night ? 'AFTER DARK' : 'DAYLIGHT'}</div><div className="day-counter">DAY <b>{String(clock.day).padStart(2, '0')}</b></div><div className="clock"><Clock3 size={14} />{time}</div><button className="icon-button" onClick={() => setPaused(true)} aria-label="Pause game"><Pause size={16} /></button></div></header>
-    <section className="mission-card"><div className="eyebrow"><span className="eyebrow-mark" />{horde ? 'DEFEND YOUR GROUND' : 'SCAVENGE · CRAFT · SURVIVE'}</div><h1>{horde ? <>THE DEAD<br />ARE HERE</> : <>A WORLD<br />LEFT BEHIND.</>}</h1><p>{horde ? 'The horde hunts until 06:00. Barricades buy time. Keep moving.' : 'Explore six connected towns. Follow the highways, watch the weather, and intercept radio supply drops.'}</p><div className="mission-line" /><div className="mission-meta"><span><Shield size={13} /> NO SAFE ZONES</span><span>{horde ? 'THREAT: EXTREME' : night ? 'THREAT: HIGH' : 'THREAT: ACTIVE'}</span></div><p className="cycle-note">{visited.length}/6 TOWNS DISCOVERED · M: COUNTY MAP</p></section>
+    <section className="mission-card"><div className="eyebrow"><span className="eyebrow-mark" /> OPERATION DEAD AIR</div><h1>{campaign.repaired.length === 6 ? <>CALL FOR<br />RESCUE.</> : <>RESTORE<br />THE SIGNAL.</>}</h1><p>{campaign.repaired.length === 6 ? 'All relays online. Reach the north highway checkpoint and press E to extract.' : 'Repair one radio relay in every town. Each costs 3 scrap and rewards 12 rounds plus water.'}</p><div className="mission-line" /><div className="mission-meta"><span><Shield size={13} /> {campaign.repaired.length}/6 RELAYS</span><span>{horde ? 'HORDE ACTIVE' : 'COUNTY RUN'}</span></div><p className="cycle-note">{visited.length}/6 TOWNS DISCOVERED · M: COUNTY MAP</p><div className="relay-progress">{RELAYS.map(r => <span key={r.id} title={`${r.name}: ${campaign.repaired.includes(r.id) ? 'online' : 'offline'}`} className={campaign.repaired.includes(r.id) ? 'online' : ''} />)}</div></section>
+    <div className="objective-bearing"><span style={{ display: 'inline-block', transform: `rotate(${-bearing}deg)` }}>↑</span><b>{objective.id === 'extraction' ? 'EXTRACTION' : `${objective.name.toUpperCase()} RELAY`}</b><small>{Math.round(objective.distance)}m · {Math.abs(bearing) < 20 ? 'AHEAD' : bearing > 0 ? 'TURN LEFT' : 'TURN RIGHT'}</small></div>
+    {prompt && active && <div className="interaction-prompt" role="status">{prompt}</div>}
+
     <div className="location-chip"><span className="location-dot" /> {inTown ? town.name.toUpperCase() : 'BLACKWATER WILDERNESS'} <span className="coords">{perspective ? 'FIRST PERSON' : 'THIRD PERSON'}</span></div>
     <section className="survival-panel"><div className="panel-heading"><span>SURVIVAL STATUS</span><span>{stats.kills} KILLS</span></div><Meter label="HEALTH" value={stats.health} color="#c45a48" icon={Heart} /><Meter label="STAMINA" value={stats.stamina} color="#d5b864" icon={Zap} /><Meter label="HUNGER" value={stats.hunger} color="#b98353" icon={Utensils} /><Meter label="THIRST" value={stats.thirst} color="#6ea7a0" icon={Droplets} /></section>
     <div className="world-readout"><strong>{crouched ? 'CROUCHED · LOW PROFILE' : 'STANDING'}{flashlight ? ' · LIGHT ON' : ''}</strong><span>{inTown ? town.biome : `NEAR ${town.name.toUpperCase()}`}</span><span>{weatherAt(clock.day, clock.hour)} · {Math.round(location.x)}, {Math.round(location.z)}</span><button onClick={() => { setMapOpen(true); setPaused(true) }}>M · COUNTY MAP</button></div>
@@ -392,7 +437,8 @@ export default function Game() {
     <div className="supply-tray" aria-label="Quick-use survival supplies"><button onClick={() => consume('ration')} disabled={!active} aria-label={`Use ration, ${inventory.ration} remaining`}>FOOD <b>{inventory.ration}</b><kbd>1</kbd></button><button onClick={() => consume('water')} disabled={!active} aria-label={`Drink water, ${inventory.water} remaining`}>WATER <b>{inventory.water}</b><kbd>2</kbd></button><button onClick={() => consume('bandage')} disabled={!active} aria-label={`Use bandage, ${inventory.bandage} remaining`}>MED <b>{inventory.bandage}</b><kbd>3</kbd></button></div>
     <div className="center-bottom"><div className="weapon-card"><div className="weapon-icon"><Crosshair size={19} /></div><div className="weapon-info"><span>{reloading ? 'RELOADING…' : aiming ? 'AIM DOWN SIGHTS' : 'SCAVENGED 9MM'}</span><button className="reload-button" onClick={reload}>R · RELOAD</button></div><div className="ammo"><strong>{String(stats.ammo).padStart(2, '0')}</strong><span>/ {stats.reserve}</span><span className="ammo-label">LOADED / RESERVE</span></div></div><div className="quick-slots"><button className="quick-slot active" onClick={() => setPerspective(p => !p)} aria-label="Toggle camera view"><span>{perspective ? <Eye size={17} /> : <EyeOff size={17} />}</span><b>{perspective ? 'FPS' : '3PS'}</b><small>V</small></button><button className="quick-slot" onClick={() => attack(false)} aria-label="Melee attack"><span><Sword size={17} /></span><b>MELEE</b><small>F</small></button><button className="quick-slot" onClick={() => attack(true)} aria-label="Fire weapon"><span><Crosshair size={16} /></span><b>FIRE</b><small>LMB</small></button></div></div>
     <div className="controls-hint"><span><kbd>WASD</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>SPACE</kbd> JUMP</span><span><kbd>X</kbd> CROUCH</span><span><kbd>L</kbd> LIGHT</span><span><kbd>E</kbd> SEARCH</span><span><kbd>M</kbd> MAP</span><span><kbd>ESC</kbd> PAUSE</span></div>
-    {mapOpen && <RegionMap location={location} visited={visited} clock={clock} onClose={() => { setMapOpen(false); setPaused(false); lockMouse() }} />}
-    {!mapOpen && (!started || paused || stats.health <= 0 || unsupported) && <div className="survival-overlay"><section className="survival-dialog"><div className="eyebrow">DEADZONE PROTOCOL · PLAYABLE PROTOTYPE</div><h2>{unsupported ? '3D unavailable' : stats.health <= 0 ? 'YOU DID NOT MAKE IT.' : paused ? 'TAKE A BREATH.' : 'BUILT TO SURVIVE.'}</h2><p>{unsupported ? 'This game needs WebGL hardware acceleration. Enable it in a desktop browser and reload. The background is only a static illustration; gameplay is disabled.' : stats.health <= 0 ? `Survived to day ${clock.day} with ${stats.kills} infected eliminated. Start again with a fresh world.` : 'Explore a seamless 780m-wide county: pine forests, farmland, industrial ruins, wetlands and red-rock hills. Six towns, roaming infected, changing weather and rotating supply drops. V switches FPS / third person; M opens the county map.'}</p>{!unsupported && <><div className="briefing-grid"><span><b>WASD + MOUSE</b>Move / look · click world to capture</span><span><b>LMB / RMB / R</b>Fire / aim / reload</span><span><b>E / 1 · 2 · 3</b>Scavenge / food · water · med</span><span><b>B / C / F</b>Build / craft ammo / melee</span></div><p className="session-note">Single-player simulation · Desktop keyboard + mouse · Session-only progress · Building exteriors only.</p><Wardrobe outfit={outfit} onOutfit={setOutfit} highQuality={highQuality} onQuality={setHighQuality} /><label className="spawn-picker">STARTING TOWN<select value={spawnTown} onChange={e => setSpawnTown(e.target.value)}>{TOWNS.map(t => <option key={t.id} value={t.id}>{t.name} — {t.biome}</option>)}</select></label>{paused && stats.health > 0 && <button className="start-survival" onClick={() => { setMapOpen(false); setPaused(false); lockMouse() }}>RESUME SURVIVAL →</button>}<button className="start-survival" onClick={() => start()}>{started ? 'RESTART · DAY 1' : 'START SURVIVAL →'}</button><button className="horde-drill" onClick={() => start(true)}>QUICK HORDE DRILL · DAY 7, 21:30</button></>}</section></div>}
+    {mapOpen && <RegionMap campaign={campaign} location={location} visited={visited} clock={clock} onClose={() => { setMapOpen(false); setPaused(false); lockMouse() }} />}
+    {campaign.extracted && <div className="survival-overlay"><section className="survival-dialog extraction-summary"><div className="eyebrow">OPERATION DEAD AIR · COMPLETE</div><h2>YOU GOT THE SIGNAL OUT.</h2><p>All six town relays are restored. Your county run is complete.</p><dl><div><dt>RELAYS ONLINE</dt><dd>6 / 6</dd></div><div><dt>DAY REACHED</dt><dd>{clock.day}</dd></div><div><dt>INFECTED ELIMINATED</dt><dd>{stats.kills}</dd></div></dl><button className="start-survival" onClick={() => start()}>NEW COUNTY RUN →</button></section></div>}
+    {!campaign.extracted && !mapOpen && (!started || paused || stats.health <= 0 || unsupported) && <div className="survival-overlay"><section className="survival-dialog"><div className="eyebrow">DEADZONE PROTOCOL · PLAYABLE PROTOTYPE</div><h2>{unsupported ? '3D unavailable' : stats.health <= 0 ? 'YOU DID NOT MAKE IT.' : paused ? 'TAKE A BREATH.' : 'BUILT TO SURVIVE.'}</h2><p>{unsupported ? 'This game needs WebGL hardware acceleration. Enable it in a desktop browser and reload. The background is only a static illustration; gameplay is disabled.' : stats.health <= 0 ? `Survived to day ${clock.day} with ${stats.kills} infected eliminated. Start again with a fresh world.` : 'Explore a seamless 780m-wide county: pine forests, farmland, industrial ruins, wetlands and red-rock hills. Restore six radio relays and reach extraction, while scavenging through roaming infected, weather and supply drops. V switches FPS / third person; M opens the county map.'}</p>{!unsupported && <><div className="briefing-grid"><span><b>WASD + MOUSE</b>Move / look · click world to capture</span><span><b>LMB / RMB / R</b>Fire / aim / reload</span><span><b>E / 1 · 2 · 3</b>Scavenge / food · water · med</span><span><b>B / C / F</b>Build / craft ammo / melee</span></div><p className="session-note">Single-player simulation · Desktop keyboard + mouse · Session-only progress · Building exteriors only.</p><Wardrobe outfit={outfit} onOutfit={setOutfit} highQuality={highQuality} onQuality={setHighQuality} /><label className="spawn-picker">STARTING TOWN<select value={spawnTown} onChange={e => setSpawnTown(e.target.value)}>{TOWNS.map(t => <option key={t.id} value={t.id}>{t.name} — {t.biome}</option>)}</select></label>{paused && stats.health > 0 && <button className="start-survival" onClick={() => { setMapOpen(false); setPaused(false); lockMouse() }}>RESUME SURVIVAL →</button>}<button className="start-survival" onClick={() => start()}>{started ? 'RESTART · DAY 1' : 'START SURVIVAL →'}</button><button className="horde-drill" onClick={() => start(true)}>QUICK HORDE DRILL · DAY 7, 21:30</button></>}</section></div>}
   </main>
 }
